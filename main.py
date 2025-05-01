@@ -22,10 +22,12 @@ console = Console()
 
 async def make_request(client, url, method, payload=None, headers=None, post_type="json"):
   start = time.perf_counter()
+  final_payload = {}
+  final_headers = {}
   try:
     if method == "POST":
-      final_payload = replace_placeholders(payload) if payload else None
-      final_headers = replace_placeholders(headers) if headers else None
+      final_payload = replace_placeholders(payload) if payload else {}
+      final_headers = replace_placeholders(headers) if headers else {}
       if post_type == "json":
         response = await client.post(url, json=final_payload, headers=headers, timeout=10)
       else:
@@ -194,7 +196,6 @@ def main():
       except Exception as e:
         console.print(f"[bold red]Failed to load json:[/] {e}")
     exit(1)
-
   asyncio.run(run_load_test(
     url=args.url,
     num_requests=args.requests,

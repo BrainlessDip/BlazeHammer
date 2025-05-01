@@ -4,7 +4,9 @@
 ---
 
 ```json
-{"username": "{faker.providers.internet.user_name}"} ➡️ {"username": "kpeterson"}
+{"username": "{faker.providers.internet.user_name}"}
+↓
+{"username": "kpeterson"}
 ```
 
 **Blaze Hammer** is an asynchronous API stress testing tool built in Python, designed for API load testing with dynamic payload and header generation using placeholder injection. It supports both `GET` and `POST` methods, JSON and form data types, and provides powerful request customization and real-time visual feedback using `rich`.
@@ -16,8 +18,6 @@
 - Live progress UI and request statistics
 - Smart response, payload, and header preview with custom parsers in **utils/custom_parsers.py**
 - JSON diffing for placeholder comparisons
-
-By defining custom parsers in `utils/custom_parsers.py`, you can easily modify how **Blaze Hammer** handles responses for specific HTTP status codes. This allows for better reporting, debugging, and response handling tailored to the specific needs of your stress testing and benchmarking.
 
 Faker providers such as `{faker.providers.internet.email}`, `{faker.providers.address.city}`, and many others can be used in your payloads and headers to generate realistic data dynamically. **Blaze Hammer** ensures precision, speed, and control for API benchmarking, whether you’re simulating high traffic or testing edge cases.
 
@@ -74,9 +74,16 @@ Faker providers such as `{faker.providers.internet.email}`, `{faker.providers.ad
   - **Description**: Compare and show differences between multiple payload files after processing with the placeholder function. This is useful for testing and debugging payload transformations.
   - **Example**: `--json-diff payload1.json`
 
-#### **Faker Provider Support in Payloads**:
-[Full list of Faker providers](https://faker.readthedocs.io/en/stable/providers.html)  
-You can utilize the full power of **Faker** in your payloads and headers by using its provider functions directly or even custom placeholders. Here are a few examples:
+By defining custom parsers in `utils/custom_parsers.py`, you can easily modify how **Blaze Hammer** handles responses for specific HTTP status codes. This allows for better reporting, debugging, and response handling tailored to the specific needs of your stress testing and benchmarking.
+
+### **Faker Provider Support in Payloads**:
+
+You can utilize the full power of [Faker](https://github.com/joke2k/faker) in your payloads and headers by using its provider functions directly or even custom placeholders.
+
+**Full list of Faker providers:**  
+[https://faker.readthedocs.io/en/stable/providers.html](https://faker.readthedocs.io/en/stable/providers.html)
+
+Here are a few examples:
 
 - `{faker.name}` - random name
 - `{faker.job}` - random job
