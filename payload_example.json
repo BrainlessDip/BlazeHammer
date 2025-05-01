@@ -4,6 +4,7 @@
   "email": "{email(prefix=user_, length=10, domains=gmail.com*hotmail.com*yahoo.com)}",
   "password": "{string(length=20)}",
   "phone_number": "{number(start=080, length=10)}",
+  "pick_line": "{pick_line(file=a.txt)}",
   "address": {
     "street_address": "{faker.street_address()}",
     "city": "{faker.city()}",

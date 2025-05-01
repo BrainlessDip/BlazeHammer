@@ -6,5 +6,8 @@
   "username": "{faker.providers.internet.user_name}",
   "email": "{faker.providers.internet.email}",
   "address": "{faker.providers.address.city}",
-  "created_at": "{faker.providers.date_time.date_this_year}"
+  "created_at": "{faker.providers.date_time.date_this_year}",
+  "custom_provider": "{faker.advanced_example(complexity=high)}",
+  "password":"{password(length=10, digits=false,uppercase=true,lowercase=false,symbols=false)}",
+   "pick_line": "{pick_line(file=requirements.txt)}"
 }

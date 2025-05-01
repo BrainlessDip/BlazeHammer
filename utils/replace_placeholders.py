@@ -9,9 +9,12 @@ import ast
 import inspect
 from datetime import datetime
 from faker import Faker
-from utils.random_functions import generate_random_email, generate_random_number, generate_random_string, generate_random_float, generate_password
+from utils.random_functions import generate_random_email, generate_random_number, generate_random_string, generate_random_float, generate_password, pick_line
+from utils.custom_providers import SimpleExampleProvider, AdvancedExampleProvider
 
 faker = Faker()
+faker.add_provider(SimpleExampleProvider)
+faker.add_provider(AdvancedExampleProvider)
 
 def parse_args(content):
     return dict(re.findall(r"(\w+)=([^,{}()]+)", content))
@@ -54,6 +57,11 @@ def replace_placeholders(obj):
             if content.startswith("int"):
                 args = parse_args(content)
                 return str(random.randint(int(args.get("min", 1)), int(args.get("max", 100))))
+            
+            # {pick_line(file=requirements.txt)}
+            if content.startswith("pick_line"):
+                args = parse_args(content)
+                return str(pick_line(args.get("file")))
             
             # {float(min=1, max=5, precision=1)}
             if content.startswith("float"):
@@ -119,7 +127,7 @@ def replace_placeholders(obj):
                         for k, v in re.findall(r"(\w+)=([^,]+)", arg_string):
                             try:
                                 kwargs[k] = ast.literal_eval(v)
-                            except:
+                            except Exception:
                                 kwargs[k] = v
 
                     # Handle providers like faker.providers.python.pyint()

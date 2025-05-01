@@ -9,17 +9,18 @@
 {"username": "kpeterson"}
 ```
 
-**Blaze Hammer** is an asynchronous API stress testing tool built in Python, designed for API load testing with dynamic payload and header generation using placeholder injection. It supports both `GET` and `POST` methods, JSON and form data types, and provides powerful request customization and real-time visual feedback using `rich`.
+**Blaze Hammer** is an asynchronous API spamming tool built in Python. It is designed for stress testing APIs by generating dynamic payloads and headers through placeholder injection. It supports both `GET` and `POST` methods, JSON and form data types, and offers powerful customization options. Real-time visual feedback is provided through `rich` for a better user experience.
 
 **Key Features**:
-- Asynchronous HTTP load testing with customizable concurrency and delay
-- Dynamic placeholder parsing via Faker and custom placeholders
-- Payload and header templating using JSON
-- Live progress UI and request statistics
-- Smart response, payload, and header preview with custom parsers in **utils/custom_parsers.py**
-- JSON diffing for placeholder comparisons
+- Asynchronous HTTP requests with customizable concurrency and delays.
+- Dynamic placeholder parsing via Faker and custom placeholders.
+- Payload and header templating using JSON.
+- Live progress UI and request statistics.
+- Smart response, payload, and header preview with custom parsers in **`utils/custom_parsers.py`**.
+- JSON diffing for placeholder comparisons.
+- Easily add custom Providers for Faker in **`utils/custom_providers.py`**.
 
-Faker providers such as `{faker.providers.internet.email}`, `{faker.providers.address.city}`, and many others can be used in your payloads and headers to generate realistic data dynamically. **Blaze Hammer** ensures precision, speed, and control for API benchmarking, whether you’re simulating high traffic or testing edge cases.
+Faker providers such as `{faker.providers.internet.email}`, `{faker.providers.address.city}`, and many others can be used in your payloads and headers to generate dynamic, realistic data. **Blaze Hammer** ensures precision, speed, and control for API benchmarking, whether you're simulating high traffic or spamming edge cases.
 
 ---
 
@@ -59,7 +60,7 @@ Faker providers such as `{faker.providers.internet.email}`, `{faker.providers.ad
   - **Example**: `-pt form` will send data as `application/x-www-form-urlencoded` instead of JSON.
 
 - `--print-payload`, `-pp`:  
-  - **Description**: Print the payload contents for each request made during the test. This helps in debugging and checking the final payload.
+  - **Description**: Print the payload contents for each request made during the test. This helps in debugging and verifying the final payload.
   - **Example**: `--print-payload` enables payload printing.
 
 - `--print-response`, `-pr`:  
@@ -71,35 +72,51 @@ Faker providers such as `{faker.providers.internet.email}`, `{faker.providers.ad
   - **Example**: `--print-headers` enables header printing.
 
 - `--json-diff`, `-jd` (optional):  
-  - **Description**: Compare and show differences between multiple payload files after processing with the placeholder function. This is useful for testing and debugging payload transformations.
+  - **Description**: Compare and show differences between multiple payload files after processing with the placeholder function. Useful for spamming and debugging payload transformations.
   - **Example**: `--json-diff payload1.json`
 
-By defining custom parsers in `utils/custom_parsers.py`, you can easily modify how **Blaze Hammer** handles responses for specific HTTP status codes. This allows for better reporting, debugging, and response handling tailored to the specific needs of your stress testing and benchmarking.
+Custom parsers in `utils/custom_parsers.py` allow you to modify how **Blaze Hammer** handles responses based on HTTP status codes. This provides better reporting, debugging, and response handling tailored to your stress tests.
+
+---
 
 ### **Faker Provider Support in Payloads**:
 
-You can utilize the full power of [Faker](https://github.com/joke2k/faker) in your payloads and headers by using its provider functions directly or even custom placeholders.
+You can fully utilize [Faker](https://github.com/joke2k/faker) in your payloads and headers by using its provider functions directly or even custom placeholders.
 
 **Full list of Faker providers:**  
 [https://faker.readthedocs.io/en/stable/providers.html](https://faker.readthedocs.io/en/stable/providers.html)
 
-Here are a few examples:
+Some examples:
 
-- `{faker.name}` - random name
-- `{faker.job}` - random job
-- `{faker.custom(field=job,locale=bn_BD)}` - generate a custom field with a custom locale
+- `{faker.name}` - Generates a random name.
+- `{faker.job}` - Generates a random job.
+- `{faker.custom(field=job, locale=bn_BD)}` - Generates a custom field with a custom locale.
 - `{faker.providers.internet.email}`: Generates a random email address.
 - `{faker.providers.address.city}`: Generates a random city name.
 - `{faker.providers.date_time.date_this_year}`: Generates a random date in the current year.
 - `{faker.providers.person.name}`: Generates a random name.
+
+Built-in placeholders:
+- `{uuid}` - Generates a UUID.
+- `{email(prefix=user_, length=10, domains=gmail.com*hotmail.com)}` - Generates a random email.
+- `{number(start=019,length=11)}` - Generates a random number.
+- `{str(length=16)}` - Generates a random dummy string.
+- `{ip}` - Generates a random IP address.
+- `{int(min=10, max=100)}` - Generates a random integer.
+- `{float(min=1, max=5, precision=1)}` - Generates a floating-point value.
+- `{choice(hey, hi, bye)}` - Chooses any item from the provided options.
+- `{date}`, `{date(format='%A %d %B %Y %I:%M:%S %p')}` – Generates a date, formatted according to the specified format. You can customize the format using Python's [datetime format codes](https://docs.python.org/3/library/datetime.html#format-codes)
+- `{timestamp}` - Current timestamp.
+- `{password(length=10, digits=false,uppercase=true,lowercase=false,symbols=false)}` - Generates a random password.
+- `{pick_line(file=path/to/file.txt)}` – Picks a random line from the specified file
 
 **Example**:
 ```json
 { 
   "name": "{faker.name}",
   "job": "{faker.job}",
-  "job_bd": "{faker.custom(field=job,locale=bn_BD)}",
-  "address_bd": "{faker.custom(field=address,locale=bn_BD)}",
+  "job_bd": "{faker.custom(field=job, locale=bn_BD)}",
+  "address_bd": "{faker.custom(field=address, locale=bn_BD)}",
   "username": "{faker.providers.internet.user_name}",
   "email": "{faker.providers.internet.email}",
   "address": "{faker.providers.address.city}",
@@ -118,16 +135,19 @@ Here are a few examples:
 }
 ```
 
-These placeholders are dynamically replaced during each request, ensuring that every test run is unique and realistic
-More payload examples in the `payload_example.json` file
+These placeholders are dynamically replaced during each request, ensuring that every test run is unique and realistic. For more payload examples, see `payload_example.json`.
 
 ---
 
 ### **Run Blaze Hammer**:
-Once you've set up the arguments and payloads, you can run **Blaze Hammer** by executing the following command:
+
+Once you've set up the arguments and payloads, you can run **Blaze Hammer** with the following command:
 
 ```bash
 python main.py <target_url> -n 200 -c 10 -d 0.5 --method POST --payload payload.json --headers headers.json --print-payload --print-response
 ```
 
 This will send 200 POST requests with a 0.5-second delay between each, printing both the payload and the response for each request.
+
+--- 
+For detailed documentation on **Blaze Hammer**, you can visit the [DeepWiki](https://deepwiki.com/BrainlessDip/BlazeHammer) for in-depth information and instructions

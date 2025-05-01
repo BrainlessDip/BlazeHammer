@@ -38,3 +38,14 @@ def generate_password(length=12, uppercase=True, lowercase=True, digits=True, sy
   if not charset:
     return "[Invalid password settings: no character sets enabled]"
   return ''.join(secrets.choice(charset) for _ in range(length))
+
+# Global cache to store file content
+cache = {}
+def pick_line(file):
+   if file not in cache:
+     try:
+       with open(file, 'r') as file:
+         cache[file] = file.readlines()
+     except Exception as e:
+       return str(e)
+   return random.choice(cache[file]).strip()
