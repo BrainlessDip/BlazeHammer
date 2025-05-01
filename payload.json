@@ -1,0 +1,10 @@
+{ 
+  "name": "{faker.name}",
+  "job": "{faker.job}",
+  "job_bd":"{faker.custom(field=job,locale=en_US)}",
+  "address_bd":"{faker.custom(field=address,locale=en_US)}",
+  "username": "{faker.providers.internet.user_name}",
+  "email": "{faker.providers.internet.email}",
+  "address": "{faker.providers.address.city}",
+  "created_at": "{faker.providers.date_time.date_this_year}"
+}

@@ -1,0 +1,157 @@
+{
+  "user_id": "{uuid}",
+  "username": "{faker.user_name()}",
+  "email": "{email(prefix=user_, length=10, domains=gmail.com*hotmail.com*yahoo.com)}",
+  "password": "{string(length=20)}",
+  "phone_number": "{number(start=080, length=10)}",
+  "address": {
+    "street_address": "{faker.street_address()}",
+    "city": "{faker.city()}",
+    "state": "{faker.state()}",
+    "postal_code": "{faker.zipcode()}",
+    "country": "{faker.country()}"
+  },
+  "dob": "{faker.date_of_birth(minimum_age=18, maximum_age=65)}",
+  "profile": {
+    "full_name": "{faker.name()}",
+    "gender": "{choice(male, female, non-binary)}",
+    "birthdate": "{faker.date_of_birth(minimum_age=18, maximum_age=80)}",
+    "email": "{email(prefix=user_, length=12)}",
+    "phone": "{phone_number}",
+    "address": {
+      "street": "{faker.street_address()}",
+      "city": "{faker.city()}",
+      "state": "{faker.state()}",
+      "country": "{faker.country()}"
+    },
+    "social_profiles": {
+      "facebook": "{faker.url()}",
+      "twitter": "{faker.url()}",
+      "linkedin": "{faker.url()}",
+      "instagram": "{faker.url()}"
+    }
+  },
+  "company": {
+    "company_name": "{faker.company()}",
+    "catch_phrase": "{faker.catch_phrase()}",
+    "industry": "{faker.bs()}",
+    "address": {
+      "street_address": "{faker.street_address()}",
+      "city": "{faker.city()}",
+      "state": "{faker.state()}",
+      "postal_code": "{faker.zipcode()}",
+      "country": "{faker.country()}"
+    },
+    "employees": [
+      {
+        "employee_id": "{uuid}",
+        "name": "{faker.name()}",
+        "email": "{email(prefix=emp_, length=10)}",
+        "position": "{faker.job()}",
+        "salary": "{float(min=35000, max=200000, precision=2)}"
+      },
+      {
+        "employee_id": "{uuid}",
+        "name": "{faker.name()}",
+        "email": "{email(prefix=emp_, length=10)}",
+        "position": "{faker.job()}",
+        "salary": "{float(min=35000, max=150000, precision=2)}"
+      }
+    ],
+    "revenue": "{float(min=500000, max=10000000, precision=2)}",
+    "market_share": "{float(min=0.1, max=50, precision=1)}",
+    "founding_date": "{faker.date_of_birth(minimum_age=20, maximum_age=40)}"
+  },
+  "product": {
+    "product_id": "{uuid}",
+    "product_name": "{faker.word()}",
+    "category": "{choice(electronics, furniture, clothing, toys, food)}",
+    "price": "{float(min=1.99, max=1000.00, precision=2)}",
+    "stock_quantity": "{int(min=0, max=500)}",
+    "description": "{faker.sentence()}",
+    "created_at": "{date(format=%Y-%m-%d %H:%M:%S)}",
+    "updated_at": "{date(format=%Y-%m-%d %H:%M:%S)}",
+    "rating": "{float(min=1, max=5, precision=1)}"
+  },
+  "order": {
+    "order_id": "{uuid}",
+    "user_id": "{uuid}",
+    "product_id": "{uuid}",
+    "quantity": "{int(min=1, max=10)}",
+    "total_price": "{float(min=20, max=10000, precision=2)}",
+    "order_date": "{date(format=%Y-%m-%d)}",
+    "delivery_date": "{date(format=%Y-%m-%d)}",
+    "status": "{choice(pending, shipped, delivered, cancelled)}",
+    "shipping_address": {
+      "street": "{faker.street_address()}",
+      "city": "{faker.city()}",
+      "state": "{faker.state()}",
+      "postal_code": "{faker.zipcode()}",
+      "country": "{faker.country()}"
+    },
+    "payment_method": "{choice(credit_card, paypal, bank_transfer, cash_on_delivery)}",
+    "payment_status": "{choice(paid, pending, failed)}"
+  },
+  "transaction": {
+    "transaction_id": "{uuid}",
+    "user_id": "{uuid}",
+    "amount": "{float(min=1, max=5000, precision=2)}",
+    "currency": "{choice(USD, EUR, GBP, INR)}",
+    "transaction_type": "{choice(deposit, withdrawal, transfer)}",
+    "status": "{choice(success, failed, pending)}",
+    "transaction_date": "{date(format=%Y-%m-%d %H:%M:%S)}",
+    "payment_method": "{choice(credit_card, paypal, bank_transfer)}"
+  },
+  "events": [
+    {
+      "event_id": "{uuid}",
+      "event_name": "{faker.bs()}",
+      "event_date": "{date(format=%Y-%m-%d)}",
+      "location": "{faker.city()}",
+      "event_type": "{choice(conference, seminar, workshop, concert)}",
+      "attendees": "{int(min=50, max=5000)}"
+    },
+    {
+      "event_id": "{uuid}",
+      "event_name": "{faker.bs()}",
+      "event_date": "{date(format=%Y-%m-%d)}",
+      "location": "{faker.city()}",
+      "event_type": "{choice(conference, seminar, workshop, concert)}",
+      "attendees": "{int(min=50, max=5000)}"
+    }
+  ],
+  "reviews": [
+    {
+      "review_id": "{uuid}",
+      "user_id": "{uuid}",
+      "product_id": "{uuid}",
+      "rating": "{float(min=1, max=5, precision=1)}",
+      "comment": "{faker.sentence()}"
+    },
+    {
+      "review_id": "{uuid}",
+      "user_id": "{uuid}",
+      "product_id": "{uuid}",
+      "rating": "{float(min=1, max=5, precision=1)}",
+      "comment": "{faker.sentence()}"
+    }
+  ],
+  "social_media": {
+    "facebook": "{faker.url()}",
+    "twitter": "{faker.url()}",
+    "linkedin": "{faker.url()}",
+    "instagram": "{faker.url()}"
+  },
+  "multi_factor_auth": {
+    "email_verified": "{bool}",
+    "phone_verified": "{bool}",
+    "google_auth_enabled": "{bool}",
+    "last_login": "{date(format=%Y-%m-%d %H:%M:%S)}",
+    "last_ip": "{ip}"
+  },
+  "faker.providers": {
+    "email": "{faker.providers.internet.email}",
+    "name": "{faker.providers.person.name}",
+    "phone_number": "{faker.providers.phone_number.phone_number}"
+  }
+}

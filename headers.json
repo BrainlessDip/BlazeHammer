@@ -1,0 +1,6 @@
+{
+  "Content-Type": "application/json",
+  "User-Agent": "{faker.providers.user_agent.chrome}",
+  "Authorization": "Bearer {password(length=32)}",
+  "X-Request-ID": "{uuid}"
+}
