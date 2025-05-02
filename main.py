@@ -179,7 +179,7 @@ async def run_load_test(
         ]
         
         with Live(Panel(progress, title="⚡ Blaze Hammer", border_style="bold magenta"), 
-                 refresh_per_second=1,
+                 refresh_per_second=60,
                  console=console):
             await asyncio.gather(*tasks)
     
