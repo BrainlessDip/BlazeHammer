@@ -1,165 +1,169 @@
 import re
-import string
-import secrets
-import uuid
 import random
-import json
+import uuid
 import time
 import ast
-import inspect
 from datetime import datetime
 from faker import Faker
-from utils.random_functions import generate_random_email, generate_random_number, generate_random_string, generate_random_float, generate_password, pick_line
 from utils.custom_providers import SimpleExampleProvider, AdvancedExampleProvider
+from utils.random_functions import (
+    generate_random_email, 
+    generate_random_number, 
+    generate_random_string,
+    generate_random_float,
+    generate_password,
+    pick_line
+)
+
+PLACEHOLDER_PATTERN = re.compile(r"\{([^{}]+)\}")
+ARGS_PATTERN = re.compile(r"(\w+)=([^,{}()]+)")
+CHOICE_PATTERN = re.compile(r"choice\((.*?)\)")
+FAKER_PATTERN = re.compile(r"faker\.((providers\.[\w\.]+)|[\w_]+)(\((.*?)\))?")
+PROVIDER_PATTERN = re.compile(r"providers\.([\w\.]+)")
 
 faker = Faker()
 faker.add_provider(SimpleExampleProvider)
 faker.add_provider(AdvancedExampleProvider)
 
 def parse_args(content):
-    return dict(re.findall(r"(\w+)=([^,{}()]+)", content))
+    return dict(ARGS_PATTERN.findall(content))
 
-def replace_placeholders(obj):
+def replace_placeholders(obj, _depth=0):
+    if _depth > 10:
+        return obj
+        
     if isinstance(obj, dict):
-        return {k: replace_placeholders(v) for k, v in obj.items()}
+        return {k: replace_placeholders(v, _depth+1) for k, v in obj.items()}
     elif isinstance(obj, list):
-        return [replace_placeholders(i) for i in obj]
-    elif isinstance(obj, str):
-        def repl(match):
-            raw_content = match.group(1).strip()
-            # Resolve nested placeholders first
-            content = replace_placeholders(raw_content)
+        return [replace_placeholders(i, _depth+1) for i in obj]
+    elif not isinstance(obj, str):
+        return obj
+
+    if '{' not in obj or '}' not in obj:
+        return obj
+
+    def repl(match):
+        content = match.group(1).strip()
+        
+        if content == "uuid":
+            return str(uuid.uuid4())
+        elif content == "timestamp":
+            return str(int(time.time()))
+        elif content == "bool":
+            return str(random.choice([True, False]))
+        elif content == "ip":
+            return f"{random.randint(0,255)}.{random.randint(0,255)}.{random.randint(0,255)}.{random.randint(0,255)}"
+        
+        if content.startswith(('email', 'number', 'str', 'string', 'int', 'float', 'password')):
+            args = parse_args(content)
             
-            # {uuid}
-            if content == "uuid":
-                return str(uuid.uuid4())
-            
-            # {email(prefix=user_, length=10, domains=gmail.com*hotmail.com*yahoo.com)}
-            if content.startswith("email"):
-                args = parse_args(content)
-                return generate_random_email(prefix=args.get("prefix", "Human"), length=int(args.get("length", 5)), domains=args.get("domains", "gmail.com").split("*"))
-            
-            # {number(start=9,length=11)}
-            if content.startswith("number"):
-                args = parse_args(content)
-                return generate_random_number(args.get("start", "019"), int(args.get("length", 11)))
-            
-            # {str(length=16)}
-            if content.startswith("str") or content.startswith("string"):
-                args = parse_args(content)
+            if content.startswith('email'):
+                return generate_random_email(
+                    prefix=args.get("prefix", "Human"),
+                    length=int(args.get("length", 5)),
+                    domains=args.get("domains", "gmail.com").split("*")
+                )
+            elif content.startswith('number'):
+                return generate_random_number(
+                    args.get("start", "019"),
+                    int(args.get("length", 11))
+                )
+            elif content.startswith(('str', 'string')):
                 return generate_random_string(int(args.get("length", 8)))
-            
-            # {ip}
-            if content.startswith("ip"):
-                return f"{random.randint(0, 255)}.{random.randint(0, 255)}.{random.randint(0, 255)}.{random.randint(0, 255)}"
-            
-            # {int(max=100)}
-            if content.startswith("int"):
-                args = parse_args(content)
-                return str(random.randint(int(args.get("min", 1)), int(args.get("max", 100))))
-            
-            # {pick_line(file=requirements.txt)}
-            if content.startswith("pick_line"):
-                args = parse_args(content)
-                return str(pick_line(args.get("file")))
-            
-            # {float(min=1, max=5, precision=1)}
-            if content.startswith("float"):
-                args = parse_args(content)
-                return generate_random_float(float(args.get("min", 0)), float(args.get("max", 1)), int(args.get("precision", 2)))
-            
-            # {choice(hey,hi,bye)}
-            if content.startswith("choice"):
-                choices = re.findall(r"choice\((.*?)\)", content)
-                if choices:
-                    return random.choice([x.strip() for x in choices[0].split(",")])
-            
-            # {date} , {date(format=%A, %d %B %Y %I:%M:%S %p)} 
-            if content.startswith("date"):
-                args = parse_args(content)
-                fmt = args.get("format", "%Y-%m-%d")
-                return datetime.now().strftime(fmt)
-            
-            # {timestamp} - 
-            if content.startswith("timestamp"):
-                return str(int(time.time()))
-            
-            # {password(length=6,digits=false)} - 
-            if content.startswith("password"):
-                args = parse_args(content)
+            elif content.startswith('int'):
+                return str(random.randint(
+                    int(args.get("min", 1)),
+                    int(args.get("max", 100))
+                ))
+            elif content.startswith('float'):
+                return generate_random_float(
+                    float(args.get("min", 0)),
+                    float(args.get("max", 1)),
+                    int(args.get("precision", 2))
+                )
+            elif content.startswith('password'):
                 return generate_password(
                     length=int(args.get("length", 8)),
                     uppercase=args.get("uppercase", "true").lower() == "true",
                     lowercase=args.get("lowercase", "true").lower() == "true",
                     digits=args.get("digits", "true").lower() == "true",
-                    symbols=args.get("symbols", "false").lower() == "true")
-            
-            # --- FAKE DATA HANDLING ---
-            if content.startswith("faker."):
-                args = parse_args(content)
-                locale = args.get("locale")
-                fake = Faker(locale) if locale else faker
-
-                # Support {faker.profile(field=name)}
-                if content.startswith("faker.profile"):
-                    field = args.get("field", "job")
-                    try:
-                        return str(fake.profile()[field])
-                    except KeyError:
-                        return f"[Invalid profile field: {field}]"
-
-                # Support {faker.custom(field=name,locale=bn_BD)}
-                if content.startswith("faker.custom"):
-                    field = args.get("field")
-                    if field and hasattr(fake, field):
-                        return str(getattr(fake, field)())
-                    return f"[Invalid custom field: {field}]"
-
-                # Match {faker.field} or {faker.providers.module.method(...)}
-                match_field = re.match(r"faker\.((providers\.[\w\.]+)|[\w_]+)(\((.*?)\))?", content)
-                if match_field:
-                    full_path = match_field.group(1)
-                    arg_string = match_field.group(4)
-
-                    # Parse arguments safely
-                    kwargs = {}
-                    if arg_string:
-                        for k, v in re.findall(r"(\w+)=([^,]+)", arg_string):
-                            try:
-                                kwargs[k] = ast.literal_eval(v)
-                            except Exception:
-                                kwargs[k] = v
-
-                    # Handle providers like faker.providers.python.pyint()
-                    if full_path.startswith("providers."):
-                        try:
-                            parts = full_path.split(".")
-                            provider_module = ".".join(parts[1:-1])
-                            method_name = parts[-1]
-                            provider = __import__(f"faker.providers.{provider_module}", fromlist=["Provider"]).Provider
-                            method = getattr(provider(fake), method_name)
-                            if callable(method):
-                                return str(method(**kwargs))
-                            return method
-                        except Exception as e:
-                            return f"[Invalid provider call: {e}]"
-                    else:
-                        # Normal faker.field like faker.name or faker.email
-                        if hasattr(fake, full_path):
-                            method = getattr(fake, full_path)
-                            if callable(method):
-                                return str(method(**kwargs))
-                            return str(method)
-                        return f"[Invalid faker field: {full_path}]"
-            return match.group(0)
-
-        # Recursively replace all placeholders
-        while "{" in obj and "}" in obj:
-            if "bool" in obj:
-              return random.choice([True,False])
-            new_obj = re.sub(r"\{([^{}]+)\}", repl, obj)
-            if new_obj == obj:
-                break
-            obj = new_obj
-        return obj
+                    symbols=args.get("symbols", "false").lower() == "true"
+                )
+        
+        elif content.startswith('pick_line'):
+            args = parse_args(content)
+            return str(pick_line(args.get("file")))
+        
+        elif content.startswith('choice'):
+            choices = CHOICE_PATTERN.search(content)
+            if choices:
+                return random.choice([x.strip() for x in choices.group(1).split(",")])
+        
+        elif content.startswith('date'):
+            args = parse_args(content)
+            return datetime.now().strftime(args.get("format", "%Y-%m-%d"))
+        
+        elif content.startswith('faker.'):
+            return handle_faker_content(content)
+        
+        return match.group(0)
+    
+    while True:
+        new_obj = PLACEHOLDER_PATTERN.sub(repl, obj)
+        if new_obj == obj:
+            break
+        obj = new_obj
+    
     return obj
+
+def handle_faker_content(content):
+    """Handler for faker-related placeholders"""
+    args = parse_args(content)
+    locale = args.get("locale")
+    fake = Faker(locale) if locale else faker
+
+    if content.startswith("faker.profile"):
+        field = args.get("field", "job")
+        try:
+            return str(fake.profile()[field])
+        except KeyError:
+            return f"[Invalid profile field: {field}]"
+
+    if content.startswith("faker.custom"):
+        field = args.get("field")
+        if field and hasattr(fake, field):
+            return str(getattr(fake, field)())
+        return f"[Invalid custom field: {field}]"
+
+    match = FAKER_PATTERN.match(content)
+    if not match:
+        return content
+
+    full_path = match.group(1)
+    arg_string = match.group(4)
+    kwargs = {}
+
+    if arg_string:
+        for k, v in ARGS_PATTERN.findall(arg_string):
+            try:
+                kwargs[k] = ast.literal_eval(v)
+            except (ValueError, SyntaxError):
+                kwargs[k] = v
+
+    if full_path.startswith("providers."):
+        try:
+            provider_match = PROVIDER_PATTERN.match(full_path)
+            if provider_match:
+                provider_path = provider_match.group(1).split('.')
+                module = "faker.providers." + ".".join(provider_path[:-1])
+                method_name = provider_path[-1]
+                provider = __import__(module, fromlist=["Provider"]).Provider
+                method = getattr(provider(fake), method_name)
+                return str(method(**kwargs)) if callable(method) else str(method)
+        except Exception as e:
+            return f"[Provider error: {e}]"
+    elif hasattr(fake, full_path):
+        method = getattr(fake, full_path)
+        return str(method(**kwargs)) if callable(method) else str(method)
+
+    return f"[Invalid faker field: {full_path}]"
