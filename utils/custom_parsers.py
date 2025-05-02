@@ -1,20 +1,13 @@
  # Custom parsers for different status codes
 def parse_200(response):
-  Json = response.json()
-  msg = Json.get('msg')
-  return f"- {msg}"
-
-# Custom response parser for 302 Found
-def parse_302(response):
-  location = response.headers.get('Location', 'No Location header found')
-  return f"- Redirected to: {location}"
+  return f"- {response}"
 
 custom_response_parsers = {
-  'all': parse_302,
+  'all': parse_200,
   200: parse_200
 }
 
-# Custom payload parser for 302 Found
+# Custom payload parser
 def payload_parse(json):
    return json
 
@@ -22,10 +15,12 @@ custom_payload_parsers = {
   'all': payload_parse,
   200: payload_parse
 }
-# Custom headers parser for 302 Found
+
+# Custom headers parser
 def headers_parse(json):
-   return json['Referer']
+   return json
 
 custom_headers_parsers = {
-  302: headers_parse
+  "all": headers_parse,
+  200: headers_parse
 }
