@@ -11,6 +11,7 @@ import re
 from utils.custom_parsers import custom_response_parsers, custom_payload_parsers, custom_headers_parsers
 from utils.compare_json import compare_json
 from utils.replace_placeholders import replace_placeholders
+from rich_argparse import ArgumentDefaultsRichHelpFormatter
 from datetime import datetime
 from rich.console import Console, Group
 from rich.live import Live
@@ -147,18 +148,18 @@ async def run_load_test(url, num_requests=100, concurrency=10, delay=0, method="
       console.print(f" - {err}")
 
 def main():
-  parser = argparse.ArgumentParser(description="⚡ Blaze Hammer")
+  parser = argparse.ArgumentParser(prog="main.py",description="⚡ Blaze Hammer is an asynchronous API spamming tool built in Python. It is designed for stress testing APIs by generating dynamic payloads and headers through placeholder injection",epilog="\033[96mMade with 🧠 by Brainless Dip\033[0m",formatter_class=ArgumentDefaultsRichHelpFormatter)
   parser.add_argument("url",nargs="?", help="Target URL")
-  parser.add_argument("-n", "--requests", type=int, default=100, help="Total number of requests (default: 100)")
-  parser.add_argument("-c", "--concurrency", type=int, default=10, help="Concurrency level (default: 10)")
-  parser.add_argument("-d", "--delay", type=float, default=0, help="Delay between requests (default: 0)")
-  parser.add_argument("-m", "--method", choices=["GET", "POST"], default="GET", help="HTTP Method  (default: GET)")
+  parser.add_argument("-n", "--requests", type=int, default=100, help="Total number of requests")
+  parser.add_argument("-c", "--concurrency", type=int, default=10, help="Concurrency level")
+  parser.add_argument("-d", "--delay", type=float, default=0, help="Delay between requests")
+  parser.add_argument("-m", "--method", choices=["GET", "POST"], default="GET", help="HTTP Method")
   
-  parser.add_argument("--payload","-p", help="Path to JSON payload file (default: payload.json)", default="payload.json")
-  parser.add_argument("--headers","--h", help="Path to JSON headers file (default: headers.json)", default="headers.json")
+  parser.add_argument("--payload","-p", help="Path to JSON payload file", default="payload.json")
+  parser.add_argument("--headers","--h", help="Path to JSON headers file", default="headers.json")
   parser.add_argument("--disable-headers", "-dh", action="store_true", help="Do not include the header file in the request")
   
-  parser.add_argument("--post-type","-pt", choices=["json", "form"], default="json", help="POST body type (default: json)")
+  parser.add_argument("--post-type","-pt", choices=["JSON", "FORM"], default="json", help="POST body type")
   
   parser.add_argument("--print-payload",'-pp' ,action="store_true", help="Print the payload contents")
   parser.add_argument("--print-response",'-pr' ,action="store_true", help="Print the response contents")
