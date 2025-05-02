@@ -3,10 +3,6 @@ import httpx
 import json
 import argparse
 import time
-import statistics
-import secrets
-import string
-import random
 import re
 from utils.custom_parsers import custom_response_parsers, custom_payload_parsers, custom_headers_parsers
 from utils.compare_json import compare_json
@@ -159,7 +155,7 @@ def main():
   parser.add_argument("--headers","--h", help="Path to JSON headers file", default="headers.json")
   parser.add_argument("--disable-headers", "-dh", action="store_true", help="Do not include the header file in the request")
   
-  parser.add_argument("--post-type","-pt", choices=["JSON", "FORM"], default="json", help="POST body type")
+  parser.add_argument("--post-type","-pt", choices=["json", "form"], default="json", help="Defines the body type for POST requests")
   
   parser.add_argument("--print-payload",'-pp' ,action="store_true", help="Print the payload contents")
   parser.add_argument("--print-response",'-pr' ,action="store_true", help="Print the response contents")
