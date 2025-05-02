@@ -9,7 +9,7 @@
 {"username": "kpeterson"}
 ```
 
-**Blaze Hammer** is an asynchronous API spamming tool built in Python. It is designed for stress testing APIs by generating dynamic payloads and headers through placeholder injection. It supports both `GET` and `POST` methods, JSON and form data types, and offers powerful customization options. Real-time visual feedback is provided through `rich` for a better user experience.
+**Blaze Hammer** is an asynchronous API spamming tool built in Python. It is designed for spamming APIs by generating dynamic payloads and headers through placeholder injection. It supports both `GET` and `POST` methods, JSON and form data types, and offers powerful customization options. Real-time visual feedback is provided through `rich` for a better user experience.
 
 **Key Features**:
 - Asynchronous HTTP requests with customizable concurrency and delays.
@@ -19,8 +19,6 @@
 - Smart response, payload, and header preview with custom parsers in **`utils/custom_parsers.py`**.
 - JSON diffing for placeholder comparisons.
 - Easily add custom Providers for Faker in **`utils/custom_providers.py`**.
-
-Faker providers such as `{faker.providers.internet.email}`, `{faker.providers.address.city}`, and many others can be used in your payloads and headers to generate dynamic, realistic data. **Blaze Hammer** ensures precision, speed, and control for API benchmarking, whether you're simulating high traffic or spamming edge cases.
 
 ---
 
@@ -55,6 +53,10 @@ Faker providers such as `{faker.providers.internet.email}`, `{faker.providers.ad
   - **Description**: Path to the JSON headers file. Similar to payloads, headers can include dynamic placeholders for custom headers.
   - **Example**: `--headers headers.json`
 
+- `--disable-headers`, `-dh` (default: `False`):  
+  - **Description**: Do not include the header file in the request
+  - **Example**: `--disable-headers`
+
 - `--post-type`, `-pt` (default: `json`):  
   - **Description**: Defines the body type for POST requests. Can be either `json` or `form`.
   - **Example**: `-pt form` will send data as `application/x-www-form-urlencoded` instead of JSON.
@@ -80,6 +82,8 @@ Custom parsers in `utils/custom_parsers.py` allow you to modify how **Blaze Hamm
 ---
 
 ### **Faker Provider Support in Payloads**:
+
+[Faker](https://github.com/joke2k/faker) providers such as `{faker.providers.internet.email}`, `{faker.providers.address.city}`, and many others can be used in your payloads and headers to generate dynamic, realistic data. **Blaze Hammer** ensures precision, speed, and control for API benchmarking, whether you're simulating high traffic or spamming edge cases
 
 You can fully utilize [Faker](https://github.com/joke2k/faker) in your payloads and headers by using its provider functions directly or even custom placeholders.
 

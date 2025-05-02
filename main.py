@@ -87,24 +87,26 @@ async def run_load_test(url, num_requests=100, concurrency=10, delay=0, method="
           code = result["status_code"]
           status_codes[code] = status_codes.get(code, 0) + 1
           timestamp = datetime.now().strftime("%H:%M:%S")
-          if print_payload:
-            if code in custom_payload_parsers or 'all' in custom_payload_parsers:
-              parsed = custom_payload_parsers[code if code in custom_payload_parsers else 'all'](result["final_payload"])
-              console.print(f"[{timestamp} • [yellow]Payload[/yellow] • {result['status_code']}]\n{parsed}",justify="left")
-            else:
-              console.print(f"[{timestamp} • [yellow]Payload[/yellow] • {result['status_code']}]\n- Not Found in 'custom_payload_parsers'\n",justify="left")
           if print_headers:
             if code in custom_headers_parsers or 'all' in custom_headers_parsers:
               parsed = custom_headers_parsers[code if code in custom_headers_parsers else 'all'](result["final_headers"])
               console.print(f"[[bold cyan]{timestamp}[/bold cyan] • [bold magenta]Headers[/bold magenta] • [bold green]{result['status_code']}[/bold green]]\n{parsed}",justify="left")
             else:
              console.print(f"[[bold cyan]{timestamp}[/bold cyan] • [bold magenta]Headers[/bold magenta] • [bold green]{result['status_code']}[/bold green]]\n- Not found in `custom_headers_parsers`",justify="left")
+          if print_payload:
+            if code in custom_payload_parsers or 'all' in custom_payload_parsers:
+              parsed = custom_payload_parsers[code if code in custom_payload_parsers else 'all'](result["final_payload"])
+              console.print(f"[{timestamp} • [yellow]Payload[/yellow] • {result['status_code']}]\n{parsed}",justify="left")
+            else:
+              console.print(f"[{timestamp} • [yellow]Payload[/yellow] • {result['status_code']}]\n- Not Found in 'custom_payload_parsers'",justify="left")
           if print_response:
             if code in custom_response_parsers or 'all' in custom_response_parsers:
               parsed = custom_response_parsers[code if code in custom_response_parsers else 'all'](result["response"])
-              console.print(f"[{timestamp} • [yellow]Response[/yellow] • {result['status_code']}]\n{parsed}\n",justify="left")
+              console.print(f"[{timestamp} • [yellow]Response[/yellow] • {result['status_code']}]\n{parsed}",justify="left")
             else:
-              console.print(f"[{timestamp} • [yellow]Response[/yellow] • {result['status_code']}]\n- Not found in `custom_response_parsers`\n",justify="left")
+              console.print(f"[{timestamp} • [yellow]Response[/yellow] • {result['status_code']}]\n- Not found in `custom_response_parsers`",justify="left")
+          if any([print_response, print_payload, print_headers]):
+            console.print("\n")
         else:
           failure_count += 1
           errors.append(result["error"])
@@ -154,6 +156,7 @@ def main():
   
   parser.add_argument("--payload","-p", help="Path to JSON payload file (default: payload.json)", default="payload.json")
   parser.add_argument("--headers","--h", help="Path to JSON headers file (default: headers.json)", default="headers.json")
+  parser.add_argument("--disable-headers", "-dh", action="store_true", help="Do not include the header file in the request")
   
   parser.add_argument("--post-type","-pt", choices=["json", "form"], default="json", help="POST body type (default: json)")
   
@@ -178,7 +181,7 @@ def main():
       console.print(f"[bold red]Failed to load payload:[/] {e}")
       exit(1)
 
-  if args.headers:
+  if args.headers and not args.disable_headers:
     try:
       with open(args.headers, "r", encoding="utf-8") as f:
         headers = json.load(f)

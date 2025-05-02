@@ -149,7 +149,7 @@ def replace_placeholders(obj):
                             method = getattr(fake, full_path)
                             if callable(method):
                                 return str(method(**kwargs))
-                            return method
+                            return str(method)
                         return f"[Invalid faker field: {full_path}]"
             return match.group(0)
 
