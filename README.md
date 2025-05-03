@@ -1,8 +1,3 @@
-### **Blaze Hammer**  
-**Launching Soon – Stay Tuned**
-
----
-
 ```json
 {"username": "{faker.providers.internet.user_name}"}
 ↓
