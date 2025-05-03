@@ -49,6 +49,10 @@
   - **Description**: Path to the JSON payload file. The payload file can include placeholders like `{faker.providers.internet.email}` to generate dynamic data.
   - **Example**: `--payload payload.json`
 
+- `--file-payload`, `-fp` (default: `False`):  
+  - **Description**: Include file attachments payload. This flag loads the payload from `utils/custom_file_payload.py`
+  - **Example**: `--file-payload`
+
 - `--headers`, `--h` (default: `headers.json`):  
   - **Description**: Path to the JSON headers file. Similar to payloads, headers can include dynamic placeholders for custom headers.
   - **Example**: `--headers headers.json`

@@ -7,6 +7,7 @@ from typing import Dict, List, Optional, Union
 from utils.custom_parsers import custom_response_parsers, custom_payload_parsers, custom_headers_parsers
 from utils.compare_json import compare_json
 from utils.replace_placeholders import replace_placeholders
+from utils.custom_file_payload import attachments
 from rich_argparse import ArgumentDefaultsRichHelpFormatter
 from datetime import datetime
 from rich.console import Console
@@ -23,7 +24,8 @@ async def make_request(
     method: str,
     payload: Optional[Dict] = None,
     headers: Optional[Dict] = None,
-    post_type: str = "json"
+    post_type: str = "json",
+    file_payload: bool = False
 ) -> Dict:
     start = time.perf_counter()
     final_payload = {}
@@ -36,9 +38,10 @@ async def make_request(
             
             request_args = {
                 "headers": headers,
-                "timeout": 30
+                "timeout": 30,
+                **({"files": attachments} if file_payload else {})
             }
-            
+
             if post_type == "json":
                 request_args["json"] = final_payload
             else:
@@ -76,6 +79,7 @@ async def worker(
     delay: float,
     payload: Optional[Dict],
     headers: Optional[Dict],
+    file_payload: Optional[bool],
     post_type: str,
     print_payload: bool,
     print_headers: bool,
@@ -87,8 +91,9 @@ async def worker(
     if delay > 0:
         await asyncio.sleep(delay)
         
+    
     async with semaphore:
-        result = await make_request(client, url, method, payload, headers, post_type)
+        result = await make_request(client, url, method, payload, headers, post_type, file_payload)
         
         stats['completed'] += 1
         if result["success"]:
@@ -131,6 +136,7 @@ async def run_load_test(
     method: str = "GET",
     payload: Optional[Dict] = None,
     headers: Optional[Dict] = None,
+    file_payload: bool = False,
     post_type: str = "json",
     print_payload: bool = False,
     print_headers: bool = False,
@@ -170,7 +176,7 @@ async def run_load_test(
             asyncio.create_task(
                 worker(
                     client, url, method, semaphore, delay,
-                    payload, headers, post_type,
+                    payload, headers, file_payload, post_type,
                     print_payload, print_headers, print_response,
                     stats, progress, task_id
                 )
@@ -220,6 +226,7 @@ def main():
     parser.add_argument("-d", "--delay", type=float, default=0, help="Delay between requests")
     parser.add_argument("-m", "--method", choices=["GET", "POST"], default="GET", help="HTTP Method")
     parser.add_argument("--payload", "-p", help="Path to JSON payload file", default="payload.json")
+    parser.add_argument("--file-payload", "-fp", help="Include file attachments payload. This flag loads the payload from 'utils/custom_file_payload.py'",action="store_true")
     parser.add_argument("--headers", "--h", help="Path to JSON headers file", default="headers.json")
     parser.add_argument("--disable-headers", "-dh", action="store_true", help="Do not include the header file in the request")
     parser.add_argument("--post-type", "-pt", choices=["json", "form"], default="json", help="Body type for POST requests")
@@ -262,7 +269,7 @@ def main():
             except Exception as e:
                 console.print(f"[bold red]Failed to load json:[/] {e}")
         exit(1)
-        
+
     asyncio.run(run_load_test(
         url=args.url,
         num_requests=args.requests,
@@ -270,6 +277,7 @@ def main():
         delay=args.delay,
         method=args.method.upper(),
         payload=payload,
+        file_payload=args.file_payload,
         headers=headers,
         post_type=args.post_type,
         print_payload=args.print_payload,
