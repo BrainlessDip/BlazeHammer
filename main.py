@@ -3,7 +3,7 @@ import httpx
 import json
 import argparse
 import time
-from typing import Dict, List, Optional, Union
+from typing import Dict, Optional
 from utils.custom_parsers import custom_response_parsers, custom_payload_parsers, custom_headers_parsers
 from utils.compare_json import compare_json
 from utils.replace_placeholders import replace_placeholders
