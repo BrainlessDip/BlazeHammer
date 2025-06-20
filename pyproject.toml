@@ -1,0 +1,7 @@
+[project]
+name = "blazehammer"
+version = "0.1.1"
+description = "Blaze Hammer is an asynchronous API spamming tool built in Python. It is designed for spamming APIs by generating dynamic payloads and headers through placeholder injection. It supports both `GET` and `POST` methods, JSON and form data types, and offers powerful customization options. Real-time visual feedback is provided through `rich` for a better user experience"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = []
