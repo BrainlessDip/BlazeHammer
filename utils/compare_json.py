@@ -3,11 +3,13 @@ from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 
+
 def format_value(val):
     """Format dicts/lists as pretty JSON, else convert to string."""
     if isinstance(val, (dict, list)):
         return json.dumps(val, indent=2, ensure_ascii=False)
     return str(val)
+
 
 def compare_json(before, after, file):
     console = Console()
@@ -25,7 +27,7 @@ def compare_json(before, after, file):
             after_text = Text(format_value(after_val), style="green")
             table.add_row(str(key), before_text, after_text)
         else:
-           before_text = Text(format_value(before_val), style="green")
-           after_text = Text("No differences", style="blue")
-           table.add_row(str(key), before_text, after_text)
+            before_text = Text(format_value(before_val), style="green")
+            after_text = Text("No differences", style="blue")
+            table.add_row(str(key), before_text, after_text)
     console.print(table)
