@@ -24,60 +24,63 @@
   - **Description**: The target API URL you wish to test.
   - **Example**: `http://example.com/api/endpoint`
 
-- `-n`, `--requests` (default: 100):  
+- `-n`, `--requests` (default: 100) (optional):  
   - **Description**: The total number of requests to be sent during the test.
   - **Example**: `-n 200` will send 200 requests.
 
-- `-c`, `--concurrency` (default: 10):  
+- `-c`, `--concurrency` (default: 10) (optional):  
   - **Description**: The number of concurrent requests that will be sent in parallel.
   - **Example**: `-c 5` will send 5 requests concurrently.
 
-- `-d`, `--delay` (default: 0):  
+- `-d`, `--delay` (default: 0) (optional):  
   - **Description**: Delay in seconds between requests to simulate real-world traffic patterns.
   - **Example**: `-d 0.5` will introduce a 0.5-second delay between requests.
 
-- `-m`, `--method` (default: `GET`):  
+- `-m`, `--method` (default: `GET`) (optional):  
   - **Description**: HTTP method to use. Can be `GET` or `POST`.
   - **Example**: `-m POST` will use the POST method.
 
-- `--payload`, `-p` (default: `payload.json`):  
+- `--payload`, `-p` (default: `payload.json`) (optional):  
   - **Description**: Path to the JSON payload file. The payload file can include placeholders like `{faker.providers.internet.email}` to generate dynamic data.
   - **Example**: `--payload payload.json`
 
-- `--file-payload`, `-fp` (default: `False`):  
+- `--file-payload`, `-fp` (default: `False`) (optional):  
   - **Description**: Include file attachments payload. This flag loads the payload from `utils/custom_file_payload.py`
   - **Example**: `--file-payload`
 
-- `--headers`, `--h` (default: `headers.json`):  
+- `--headers`, `--h` (default: `headers.json`) (optional):  
   - **Description**: Path to the JSON headers file. Similar to payloads, headers can include dynamic placeholders for custom headers.
   - **Example**: `--headers headers.json`
 
-- `--disable-headers`, `-dh` (default: `False`):  
+- `--disable-headers`, `-dh` (default: `False`) (optional):  
   - **Description**: Do not include the header file in the request
-  - **Example**: `--disable-headers`
+  - **Example**: `--disable-headers` excludes headers from the request.
 
-- `--post-type`, `-pt` (default: `json`):  
+- `--post-type`, `-pt` (default: `json`) (optional):  
   - **Description**: Defines the body type for POST requests. Can be either `json` or `form`.
   - **Example**: `-pt form` will send data as `application/x-www-form-urlencoded` instead of JSON.
 
-- `--print-payload`, `-pp`:  
+- `--print-payload`, `-pp` (optional):  
   - **Description**: Print the payload contents for each request made during the test. This helps in debugging and verifying the final payload.
   - **Example**: `--print-payload` enables payload printing.
 
-- `--print-response`, `-pr`:  
+- `--print-response`, `-pr` (optional):  
   - **Description**: Print the response contents for each request made during the test.
   - **Example**: `--print-response` enables response printing.
 
-- `--print-headers`, `-ph`:  
+- `--print-headers`, `-ph` (optional):  
   - **Description**: Print the headers for each request made during the test.
   - **Example**: `--print-headers` enables header printing.
 
 - `--json-diff`, `-jd` (optional):  
   - **Description**: Compare and show differences between multiple payload files after processing with the placeholder function. Useful for spamming and debugging payload transformations.
-  - **Example**: `--json-diff payload1.json`
+  - **Example**: `--json-diff payload1.json` 
 
-Custom parsers in `utils/custom_parsers.py` allow you to modify how **Blaze Hammer** handles responses based on HTTP status codes. This provides better reporting, debugging, and response handling tailored to your stress tests.
+- `--simple`, `-s` (optional):  
+   - **Description**: Run the spam in simple mode, which disables advanced features like progress bars and live updates. This is useful for quick spam or when running in environments where rich output is not supported.
+   - **Example**: `-s` enables simple mode.
 
+Custom parsers in `utils/custom_parsers.py` allow you to modify how **Blaze Hammer** handles responses based on HTTP status codes. This provides better reporting, debugging, and response handling.
 ---
 
 ### **Faker Provider Support in Payloads**:

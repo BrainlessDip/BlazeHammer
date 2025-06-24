@@ -164,8 +164,8 @@ async def worker(
         else:
             stats["failure_count"] += 1
             stats["errors"].add(result["error"])
-
-        progress.advance(task_id)
+        if progress:
+            progress.advance(task_id)
 
 
 async def run_load_test(
@@ -181,6 +181,7 @@ async def run_load_test(
     print_payload: bool = False,
     print_headers: bool = False,
     print_response: bool = False,
+    simple: bool = False,
 ) -> None:
     stats = {
         "success_count": 0,
@@ -192,14 +193,18 @@ async def run_load_test(
     }
 
     start_time = time.time()
-    progress = Progress(
-        MofNCompleteColumn(),
-        TimeElapsedColumn(),
-        TimeRemainingColumn(),
-        transient=True,
-        expand=True,
+    progress = (
+        Progress(
+            MofNCompleteColumn(),
+            TimeElapsedColumn(),
+            TimeRemainingColumn(),
+            transient=True,
+            expand=True,
+        )
+        if not simple
+        else None
     )
-    task_id = progress.add_task("", total=num_requests)
+    task_id = progress.add_task("", total=num_requests) if progress else None
 
     async with httpx.AsyncClient(
         limits=httpx.Limits(
@@ -234,12 +239,19 @@ async def run_load_test(
             for _ in range(num_requests)
         ]
 
-        with Live(
-            Panel(progress, title="⚡ Blaze Hammer", border_style="bold magenta"),
-            refresh_per_second=60,
-            console=console,
-        ):
+        if simple:
+            console.print(
+                f"[bold green]Starting {num_requests} requests with concurrency {concurrency}[/bold green]"
+            )
             await asyncio.gather(*tasks)
+            console.print("[bold green]All requests completed![/bold green]")
+        else:
+            with Live(
+                Panel(progress, title="⚡ Blaze Hammer", border_style="bold magenta"),
+                refresh_per_second=60,
+                console=console,
+            ):
+                await asyncio.gather(*tasks)
 
     total_time = time.time() - start_time
 
@@ -328,6 +340,12 @@ def main():
     parser.add_argument(
         "--json-diff", "-jd", nargs="+", metavar="FILE", help="Compare JSON files"
     )
+    parser.add_argument(
+        "--simple",
+        "-s",
+        action="store_true",
+        help="Run in simple mode (no progress bar, no live updates)",
+    )
 
     args = parser.parse_args()
 
@@ -380,6 +398,7 @@ def main():
             print_payload=args.print_payload,
             print_headers=args.print_headers,
             print_response=args.print_response,
+            simple=args.simple,
         )
     )
 
