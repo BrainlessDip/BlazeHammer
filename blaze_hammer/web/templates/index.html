@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Blaze Hammer</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  darkMode: 'class',
+  theme: {
+    extend: {
+      colors: {
+        ink: {950:'#0b0d10',900:'#11141a',800:'#171b23',700:'#1f252e',600:'#2a313d'},
+        ember:{400:'#fb923c',500:'#f97316',600:'#ea580c'},
+      },
+      fontFamily: {mono:['ui-monospace','SFMono-Regular','Menlo','Consolas','monospace']},
+    }
+  }
+}
+</script>
+<style>
+  body{background:#0b0d10}
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-thumb{background:#2a313d;border-radius:6px}
+  .fade-in{animation:fi .18s ease-out}
+  @keyframes fi{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+  .pulse-dot{animation:pd 1.8s infinite}
+  @keyframes pd{0%,100%{opacity:1}50%{opacity:.35}}
+</style>
+</head>
+<body class="text-slate-200 font-sans antialiased">
+
+<!-- ============ LOGIN ============ -->
+<div id="login-view" class="fixed inset-0 z-50 hidden items-center justify-center bg-ink-950">
+  <div class="w-full max-w-sm mx-4 rounded-lg border border-ink-600 bg-ink-900 p-8 shadow-2xl fade-in">
+    <div class="text-center mb-8">
+      <div class="text-3xl mb-2">&#128293;</div>
+      <h1 class="text-xl font-bold tracking-wide">BLAZE HAMMER</h1>
+      <p class="text-sm text-slate-400 mt-1">Sign in to dashboard</p>
+    </div>
+    <form id="login-form" class="space-y-4">
+      <div>
+        <label class="block text-xs uppercase tracking-wider text-slate-400 mb-1">Username</label>
+        <input id="login-user" autocomplete="username" required
+          class="w-full bg-ink-800 border border-ink-600 rounded px-3 py-2 text-sm focus:outline-none focus:border-ember-500">
+      </div>
+      <div>
+        <label class="block text-xs uppercase tracking-wider text-slate-400 mb-1">Password</label>
+        <input id="login-pass" type="password" autocomplete="current-password" required
+          class="w-full bg-ink-800 border border-ink-600 rounded px-3 py-2 text-sm focus:outline-none focus:border-ember-500">
+      </div>
+      <p id="login-error" class="text-sm text-red-400 hidden"></p>
+      <button type="submit"
+        class="w-full bg-ember-600 hover:bg-ember-500 text-white font-semibold py-2 rounded transition-colors">
+        Sign In
+      </button>
+    </form>
+  </div>
+</div>
+
+<!-- ============ APP ============ -->
+<div id="app-view" class="hidden min-h-screen flex flex-col">
+
+  <!-- header -->
+  <header class="flex items-center justify-between px-4 h-12 border-b border-ink-700 bg-ink-900 sticky top-0 z-40">
+    <div class="flex items-center gap-3">
+      <span class="text-lg">&#128293;</span>
+      <span class="font-bold tracking-wide">Blaze Hammer</span>
+      <span id="ws-status" data-dot="off"
+        class="ml-2 inline-flex items-center gap-1.5 text-xs text-slate-400">
+        <span class="dot w-2 h-2 rounded-full bg-slate-600"></span><span class="label">Connecting&hellip;</span>
+      </span>
+    </div>
+    <div class="flex items-center gap-3 text-sm">
+      <span id="whoami" class="text-slate-400"></span>
+      <button id="logout-btn" class="px-3 py-1 border border-ink-600 rounded hover:border-ember-500 hover:text-ember-400 transition-colors">Logout</button>
+    </div>
+  </header>
+
+  <main class="flex-1 p-4 grid gap-4 lg:grid-cols-[340px_1fr] items-start">
+
+    <!-- ===== left: run configuration ===== -->
+    <section class="rounded-lg border border-ink-700 bg-ink-900">
+      <div class="px-4 py-2.5 border-b border-ink-700 flex items-center justify-between">
+        <h2 class="text-xs font-semibold uppercase tracking-wider text-slate-400">Run Configuration</h2>
+        <span id="profile-badge" class="hidden text-[11px] px-1.5 py-0.5 rounded bg-ember-600/20 text-ember-400"></span>
+      </div>
+      <div class="p-4 space-y-3 text-sm">
+        <label class="block">
+          <span class="text-xs text-slate-400">Profile</span>
+          <select id="f-profile" class="mt-1 w-full bg-ink-800 border border-ink-600 rounded px-2 py-1.5 focus:outline-none focus:border-ember-500">
+            <option value="">(project defaults)</option>
+          </select>
+        </label>
+        <label class="block">
+          <span class="text-xs text-slate-400">Target URL</span>
+          <input id="f-target" spellcheck="false"
+            class="mt-1 w-full bg-ink-800 border border-ink-600 rounded px-2 py-1.5 font-mono text-xs focus:outline-none focus:border-ember-500">
+        </label>
+        <div class="grid grid-cols-2 gap-3">
+          <label class="block"><span class="text-xs text-slate-400">Method</span>
+            <select id="f-method" class="mt-1 w-full bg-ink-800 border border-ink-600 rounded px-2 py-1.5">
+              <option>GET</option><option>POST</option>
+            </select></label>
+          <label class="block"><span class="text-xs text-slate-400">Post type</span>
+            <select id="f-post-type" class="mt-1 w-full bg-ink-800 border border-ink-600 rounded px-2 py-1.5">
+              <option value="json">json</option><option value="form">form</option>
+            </select></label>
+          <label class="block"><span class="text-xs text-slate-400">Requests</span>
+            <input id="f-requests" type="number" min="1" class="mt-1 w-full bg-ink-800 border border-ink-600 rounded px-2 py-1.5 font-mono text-xs"></label>
+          <label class="block"><span class="text-xs text-slate-400">Concurrency</span>
+            <input id="f-concurrency" type="number" min="1" class="mt-1 w-full bg-ink-800 border border-ink-600 rounded px-2 py-1.5 font-mono text-xs"></label>
+          <label class="block"><span class="text-xs text-slate-400">Delay (s)</span>
+            <input id="f-delay" type="number" step="any" min="0" class="mt-1 w-full bg-ink-800 border border-ink-600 rounded px-2 py-1.5 font-mono text-xs"></label>
+          <label class="block"><span class="text-xs text-slate-400">Rate (req/s)</span>
+            <input id="f-rate" type="number" step="any" min="0" placeholder="-" class="mt-1 w-full bg-ink-800 border border-ink-600 rounded px-2 py-1.5 font-mono text-xs"></label>
+          <label class="block"><span class="text-xs text-slate-400">Timeout (s)</span>
+            <input id="f-timeout" type="number" step="any" min="0" class="mt-1 w-full bg-ink-800 border border-ink-600 rounded px-2 py-1.5 font-mono text-xs"></label>
+          <label class="block"><span class="text-xs text-slate-400">Retries</span>
+            <input id="f-retries" type="number" min="0" max="10" class="mt-1 w-full bg-ink-800 border border-ink-600 rounded px-2 py-1.5 font-mono text-xs"></label>
+          <label class="block"><span class="text-xs text-slate-400">Seed</span>
+            <input id="f-seed" placeholder="-" class="mt-1 w-full bg-ink-800 border border-ink-600 rounded px-2 py-1.5 font-mono text-xs"></label>
+          <label class="block"><span class="text-xs text-slate-400">Faker locale</span>
+            <input id="f-faker-locale" placeholder="default" class="mt-1 w-full bg-ink-800 border border-ink-600 rounded px-2 py-1.5 font-mono text-xs"></label>
+        </div>
+
+        <!-- actions -->
+        <div class="pt-2 flex flex-wrap gap-2">
+          <button id="start-btn" class="flex-1 bg-ember-600 hover:bg-ember-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold py-2 rounded transition-colors">Start Run</button>
+          <button id="stop-btn" disabled class="flex-1 border border-red-500/60 text-red-400 hover:bg-red-500/10 disabled:opacity-30 disabled:cursor-not-allowed py-2 rounded transition-colors">Stop</button>
+        </div>
+        <div class="flex gap-2">
+          <button id="preview-btn" class="flex-1 border border-ink-600 hover:border-ember-500 py-1.5 rounded text-xs transition-colors">Preview Request</button>
+          <button id="save-config-btn" title="Regenerate blazehammer.yaml from current values"
+            class="flex-1 border border-ink-600 hover:border-ember-500 py-1.5 rounded text-xs transition-colors">Save to Config</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== right column ===== -->
+    <div class="space-y-4 min-w-0">
+
+      <!-- stat cards -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div class="rounded-lg border border-ink-700 bg-ink-900 p-3">
+          <div class="text-[11px] uppercase tracking-wider text-slate-500">Requests</div>
+          <div id="s-completed" class="text-2xl font-semibold font-mono mt-1">0</div>
+          <div id="s-requested" class="text-[11px] text-slate-500 font-mono">/ 0</div>
+        </div>
+        <div class="rounded-lg border border-ink-700 bg-ink-900 p-3">
+          <div class="text-[11px] uppercase tracking-wider text-emerald-500">Success</div>
+          <div id="s-success" class="text-2xl font-semibold font-mono mt-1 text-emerald-400">0</div>
+        </div>
+        <div class="rounded-lg border border-ink-700 bg-ink-900 p-3">
+          <div class="text-[11px] uppercase tracking-wider text-red-500">Failed</div>
+          <div id="s-failed" class="text-2xl font-semibold font-mono mt-1 text-red-400">0</div>
+        </div>
+        <div class="rounded-lg border border-ink-700 bg-ink-900 p-3">
+          <div class="text-[11px] uppercase tracking-wider text-slate-500">Rate</div>
+          <div id="s-rps" class="text-2xl font-semibold font-mono mt-1">0<span class="text-sm text-slate-500">/s</span></div>
+        </div>
+      </div>
+
+      <!-- progress + latency -->
+      <div class="rounded-lg border border-ink-700 bg-ink-900 p-4 space-y-3">
+        <div class="flex justify-between text-xs text-slate-400 mb-1">
+          <span>Progress</span><span id="progress-pct" class="font-mono">0%</span>
+        </div>
+        <div class="h-2.5 bg-ink-700 rounded overflow-hidden">
+          <div id="progress-bar" class="h-full bg-gradient-to-r from-ember-600 to-ember-400 w-0 transition-all duration-300"></div>
+        </div>
+        <div class="grid grid-cols-3 sm:grid-cols-6 gap-3 pt-1 text-center sm:text-left">
+          <div><div class="text-[11px] text-slate-500">Elapsed</div><div id="l-elapsed" class="font-mono text-sm">-</div></div>
+          <div><div class="text-[11px] text-slate-500">Avg</div><div id="l-mean" class="font-mono text-sm">-</div></div>
+          <div><div class="text-[11px] text-slate-500">P50</div><div id="l-p50" class="font-mono text-sm">-</div></div>
+          <div><div class="text-[11px] text-slate-500">P95</div><div id="l-p95" class="font-mono text-sm">-</div></div>
+          <div><div class="text-[11px] text-slate-500">P99</div><div id="l-p99" class="font-mono text-sm">-</div></div>
+          <div><div class="text-[11px] text-slate-500">Max</div><div id="l-max" class="font-mono text-sm">-</div></div>
+        </div>
+        <!-- status histogram -->
+        <div id="status-hist" class="pt-2 space-y-1"></div>
+      </div>
+
+      <!-- tabs -->
+      <div class="rounded-lg border border-ink-700 bg-ink-900 overflow-hidden">
+        <div class="flex border-b border-ink-700 text-xs overflow-x-auto" role="tablist">
+          <button data-tab="log"     class="tab px-4 py-2.5 border-b-2 border-ember-500 text-ember-400 font-medium whitespace-nowrap">Request Log</button>
+          <button data-tab="payload" class="tab px-4 py-2.5 border-b-2 border-transparent text-slate-400 hover:text-slate-200 whitespace-nowrap">Payload</button>
+          <button data-tab="headers" class="tab px-4 py-2.5 border-b-2 border-transparent text-slate-400 hover:text-slate-200 whitespace-nowrap">Headers</button>
+          <button data-tab="preview" class="tab px-4 py-2.5 border-b-2 border-transparent text-slate-400 hover:text-slate-200 whitespace-nowrap">Preview</button>
+        </div>
+
+        <!-- log -->
+        <div id="tab-log" class="tab-panel">
+          <div class="flex gap-1 p-2 border-b border-ink-700 text-xs">
+            <button data-filter="all"     class="filter px-2.5 py-1 rounded bg-ember-600/20 text-ember-400">All</button>
+            <button data-filter="success" class="filter px-2.5 py-1 rounded text-slate-400 hover:bg-ink-700">Success</button>
+            <button data-filter="client"  class="filter px-2.5 py-1 rounded text-slate-400 hover:bg-ink-700">Client Err</button>
+            <button data-filter="server"  class="filter px-2.5 py-1 rounded text-slate-400 hover:bg-ink-700">Server Err</button>
+            <button data-filter="net"     class="filter px-2.5 py-1 rounded text-slate-400 hover:bg-ink-700">Network</button>
+            <span class="flex-1"></span>
+            <button id="clear-log-btn" class="px-2.5 py-1 rounded text-slate-400 hover:bg-ink-700">Clear</button>
+          </div>
+          <div class="max-h-72 overflow-auto font-mono text-xs">
+            <table class="w-full">
+              <thead class="sticky top-0 bg-ink-800 text-slate-400"><tr>
+                <th class="text-left px-3 py-1.5">#</th><th class="text-left px-2 py-1.5">Status</th>
+                <th class="text-right px-2 py-1.5">ms</th><th class="text-right px-3 py-1.5">Note</th>
+              </tr></thead>
+              <tbody id="log-body"></tbody>
+            </table>
+            <p id="log-empty" class="text-center text-slate-600 py-6 font-sans">No requests yet</p>
+          </div>
+        </div>
+
+        <!-- payload editor -->
+        <div id="tab-payload" class="tab-panel hidden p-3 space-y-2">
+          <textarea id="editor-payload" rows="12" spellcheck="false"
+            class="w-full bg-ink-950 border border-ink-600 rounded p-3 font-mono text-xs text-slate-300 focus:outline-none focus:border-ember-500"></textarea>
+          <div class="flex items-center gap-2 text-xs">
+            <button data-fmt="editor-payload" class="fmt-btn px-3 py-1.5 border border-ink-600 rounded hover:border-ember-500">Format</button>
+            <button data-reset="editor-payload" class="reset-btn px-3 py-1.5 border border-ink-600 rounded hover:border-ember-500">Reset</button>
+            <span id="payload-status" class="text-slate-500"></span>
+          </div>
+        </div>
+
+        <!-- headers editor -->
+        <div id="tab-headers" class="tab-panel hidden p-3 space-y-2">
+          <textarea id="editor-headers" rows="8" spellcheck="false"
+            class="w-full bg-ink-950 border border-ink-600 rounded p-3 font-mono text-xs text-slate-300 focus:outline-none focus:border-ember-500"></textarea>
+          <div class="flex items-center gap-2 text-xs">
+            <button data-fmt="editor-headers" class="fmt-btn px-3 py-1.5 border border-ink-600 rounded hover:border-ember-500">Format</button>
+            <button data-reset="editor-headers" class="reset-btn px-3 py-1.5 border border-ink-600 rounded hover:border-ember-500">Reset</button>
+            <span id="headers-status" class="text-slate-500"></span>
+          </div>
+        </div>
+
+        <!-- preview -->
+        <div id="tab-preview" class="tab-panel hidden p-3 space-y-3">
+          <div id="preview-output" class="space-y-3 font-mono text-xs text-slate-300">
+            <p class="text-slate-600 font-sans">Press "Preview Request" to generate sample requests (nothing is sent).</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <footer class="px-4 py-2 text-[11px] text-slate-600 border-t border-ink-700">
+    Blaze Hammer Web &middot; authorized testing only
+  </footer>
+</div>
+
+<!-- toast -->
+<div id="toast" class="fixed bottom-4 right-4 z-50 hidden max-w-sm rounded border border-ink-600 bg-ink-800 px-4 py-3 text-sm shadow-xl fade-in"></div>
+
+<!-- detail drawer -->
+<div id="drawer" class="fixed inset-y-0 right-0 z-40 w-full max-w-md translate-x-full transition-transform duration-200 bg-ink-900 border-l border-ink-600 shadow-2xl overflow-auto">
+  <div class="sticky top-0 bg-ink-900 border-b border-ink-700 px-4 py-3 flex items-center justify-between">
+    <h3 class="text-sm font-semibold">Request Details <span id="drawer-index" class="text-slate-500 font-mono"></span></h3>
+    <button id="drawer-close" class="text-slate-400 hover:text-white text-xl leading-none">&times;</button>
+  </div>
+  <div id="drawer-content" class="p-4 space-y-4 text-xs font-mono"></div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

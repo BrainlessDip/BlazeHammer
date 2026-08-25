@@ -1,5 +1,7 @@
-Faker==35.2.0
-httpx==0.28.1
-rich==14.0.0
-rich_argparse==1.7.0
-h2==4.2.0
+# Runtime dependencies (mirrors pyproject.toml; pyproject + uv.lock are the
+# source of truth for development).
+click>=8.1
+faker>=40.37.0
+httpx[http2]>=0.28.1
+pydantic>=2.7
+rich>=15.0.0

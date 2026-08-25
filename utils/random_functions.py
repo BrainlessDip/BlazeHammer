@@ -1,63 +1,76 @@
-import string
-import secrets
-import random
+"""Deprecated helpers kept for backwards compatibility.
+
+Generation logic now lives in ``blaze_hammer.templating.builtins`` with an
+explicitly injected ``random.Random`` (required for ``--seed`` support).
+These wrappers use an unseeded module-level Random; prefer the new API or
+the placeholder system for anything reproducible.
+"""
+
+from __future__ import annotations
+
+import random as _random_module
+
+from blaze_hammer.errors import TemplateResolutionError
+from blaze_hammer.templating.builtins import generate_password as _password_seedable
+from blaze_hammer.templating.builtins import (
+    generate_random_email as _email_seedable,
+)
+from blaze_hammer.templating.builtins import (
+    generate_random_float as _float_seedable,
+)
+from blaze_hammer.templating.builtins import (
+    generate_random_number as _number_seedable,
+)
+from blaze_hammer.templating.builtins import (
+    generate_random_string as _string_seedable,
+)
+
+_rng = _random_module.Random()
 
 
 def generate_random_email(prefix="Brainless_Dip+", length=10, domains=None):
-    if domains is None:
-        domains = ["gmail.com"]
-    charset = string.ascii_letters + string.digits
-    random_part = "".join(secrets.choice(charset) for _ in range(length))
-    domain = secrets.choice(domains)
-    return f"{prefix}{random_part}@{domain}"
+    return _email_seedable(_rng, prefix=prefix, length=length, domains=domains)
 
 
 def generate_random_number(start="013", length=8):
-    if len(start) > length:
-        raise ValueError(
-            f"The 'start' string has a length of {len(start)}, which exceeds the maximum allowed length of {length}"
-        )
-    digits = "0123456789"
-    rest = "".join(secrets.choice(digits) for _ in range(length - len(start)))
-    return f"{start}{rest}"
+    return _number_seedable(_rng, start=start, length=length)
 
 
 def generate_random_string(length=8):
-    charset = string.ascii_letters + string.digits
-    return "".join(secrets.choice(charset) for _ in range(length))
+    return _string_seedable(_rng, length=length)
 
 
 def generate_random_float(min_val, max_val, precision=2):
-    return str(round(random.uniform(min_val, max_val), precision))
+    return _float_seedable(_rng, min_val, max_val, precision)
 
 
-def generate_password(
-    length=12, uppercase=True, lowercase=True, digits=True, symbols=False
-):
-    charset = ""
-    if uppercase:
-        charset += string.ascii_uppercase
-    if lowercase:
-        charset += string.ascii_lowercase
-    if digits:
-        charset += string.digits
-    if symbols:
-        charset += "!@#$%^&*()-_=+[]{}<>?/"
-
-    if not charset:
+def generate_password(length=12, uppercase=True, lowercase=True, digits=True, symbols=False):
+    try:
+        return _password_seedable(
+            _rng,
+            length=length,
+            uppercase=uppercase,
+            lowercase=lowercase,
+            digits=digits,
+            symbols=symbols,
+        )
+    except TemplateResolutionError:
+        # Legacy behavior returned a marker string instead of raising.
         return "[Invalid password settings: no character sets enabled]"
-    return "".join(secrets.choice(charset) for _ in range(length))
 
 
-# Global cache to store file content
-cache = {}
+# Per-file cache retained for legacy callers of pick_line().
+cache: dict = {}
 
 
 def pick_line(file):
     if file not in cache:
         try:
-            with open(file, "r") as file:
-                cache[file] = file.readlines()
-        except Exception as e:
-            return str(e)
-    return random.choice(cache[file]).strip()
+            with open(file, encoding="utf-8", errors="replace") as handle:
+                cache[file] = [line.rstrip("\n") for line in handle.readlines()]
+        except Exception as exc:  # noqa: BLE001 - legacy string-return behavior
+            return str(exc)
+    lines = cache[file]
+    if not lines:
+        return "File is empty"
+    return _rng.choice(lines)
