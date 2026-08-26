@@ -8,10 +8,8 @@ defaults and the ``web`` section.
 from __future__ import annotations
 
 import secrets
-import sys
 from dataclasses import dataclass
-from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from blaze_hammer.errors import ConfigurationError
 
@@ -111,13 +109,3 @@ def generate_password(length: int = 16) -> str:
     """Random password for setup flows (printed once by the CLI)."""
     alphabet = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
     return "".join(secrets.choice(alphabet) for _ in range(max(8, length)))
-
-
-def describe_startup(settings: ResolvedWebSettings, project_file: Path | None) -> dict[str, Any]:
-    """Fields for the startup banner; never includes credential material."""
-    return {
-        "project": str(project_file) if project_file else "(no blazehammer.yaml)",
-        "url": f"http://{settings.host}:{settings.port}",
-        "auth": "enabled" if settings.auth.enabled else "disabled",
-        "python": sys.version.split()[0],
-    }

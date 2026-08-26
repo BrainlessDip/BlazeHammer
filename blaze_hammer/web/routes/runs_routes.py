@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -10,18 +11,26 @@ from fastapi import APIRouter, HTTPException, Request
 from blaze_hammer.engine.planner import RequestTemplates
 from blaze_hammer.errors import BlazeHammerError
 from blaze_hammer.services import build_run_config
-from blaze_hammer.web.dependencies import WebState, get_state, require_session, require_session_csrf
+from blaze_hammer.web.dependencies import (
+    WebState,
+    blaze_to_http,
+    get_state,
+    require_session,
+    require_session_csrf,
+)
 from blaze_hammer.web.models import (
     OkResponse,
     PreviewPlan,
     PreviewRequest,
     PreviewResponse,
+    ResponseSnapshot,
     RunListResponse,
     RunStartRequest,
     RunSummary,
+    ValidationResponse,
 )
 
-router = APIRouter(prefix="/api")
+router = APIRouter()
 
 
 def _parse_inline(text: str | None, label: str) -> dict[str, Any] | None:
@@ -57,7 +66,7 @@ async def start_run(body: RunStartRequest, request: Request) -> RunSummary:
         )
         handle = await state.manager.start(cfg, headers_obj=headers_obj, payload_obj=payload_obj)
     except BlazeHammerError as exc:
-        raise HTTPException(status_code=400, detail=exc.message) from exc
+        raise blaze_to_http(exc) from exc
     return RunSummary(**handle.summary())
 
 
@@ -98,13 +107,35 @@ async def clear_history(request: Request) -> OkResponse:
     return OkResponse(ok=bool(cleared >= 0))
 
 
-@router.get("/runs/{run_id}/log")
-async def run_log(run_id: str, request: Request, offset: int = 0) -> dict[str, Any]:
+@router.get("/runs/{run_id}/log", response_model=list[ResponseSnapshot])
+async def run_log(run_id: str, request: Request, offset: int = 0) -> list[ResponseSnapshot]:
+    """Request-level response snapshots (bounded ring buffer, newest first)."""
     require_session(request)
     state: WebState = get_state(request)
     assert state.manager is not None
     entries = state.manager.log_entries(run_id, offset=max(0, offset))
-    return {"entries": entries}
+    out: list[ResponseSnapshot] = []
+    for e in entries:
+        out.append(
+            ResponseSnapshot(
+                request_index=e.get("index", 0),
+                status_code=e.get("status"),
+                response_time_ms=e.get("latency_ms"),
+                content_type=e.get("content_type"),
+                body_size=e.get("body_size", 0),
+                response_body_excerpt=e.get("response_body_excerpt"),
+                response_body_truncated=e.get("response_body_truncated", False),
+                headers=e.get("response_headers") or {},
+                error=e.get("error") or e.get("response_error"),
+                ok=e.get("ok", True),
+                attempts=e.get("attempts", 1),
+                timestamp_ms=e.get("ts"),
+                error_category=e.get("error_category"),
+                request_headers=e.get("request_headers"),
+                request_body=e.get("request_body"),
+            )
+        )
+    return out
 
 
 @router.post("/preview", response_model=PreviewResponse)
@@ -132,7 +163,7 @@ async def preview(body: PreviewRequest, request: Request) -> PreviewResponse:
         cfg = build_run_config(overrides, profile=profile, config_path=state.config_path())
         prepared = prepare_run(cfg, with_runner=False, templates=templates)
     except BlazeHammerError as exc:
-        raise HTTPException(status_code=400, detail=exc.message) from exc
+        raise blaze_to_http(exc) from exc
 
     try:
         sensitive = prepared.planner.sensitive_names
@@ -150,3 +181,61 @@ async def preview(body: PreviewRequest, request: Request) -> PreviewResponse:
     finally:
         await prepared.aclose()
     return PreviewResponse(plans=plans_out, sensitive_names=sensitive)
+
+
+@router.post("/validate", response_model=ValidationResponse)
+async def validate(body: RunStartRequest, request: Request) -> ValidationResponse:
+    """Full pre-flight check (config, files, placeholders) without sending."""
+    from blaze_hammer.config.validation import ensure_config_valid
+    from blaze_hammer.errors import PlaceholderError
+    from blaze_hammer.templating import build_default_registry
+    from blaze_hammer.templating.validation import TemplateValidator
+
+    state: WebState = get_state(request)
+    require_session_csrf(request)
+    headers_obj = _parse_inline(body.headers_text, "headers")
+    payload_obj = _parse_inline(body.payload_text, "payload")
+
+    overrides = body.to_overrides()
+    profile = overrides.pop("profile", None)
+    for transport in ("headers_text", "payload_text", "count"):
+        overrides.pop(transport, None)
+    if headers_obj is not None or payload_obj is not None:
+        overrides["inline_templates"] = True
+
+    try:
+        cfg = build_run_config(overrides, profile=profile, config_path=state.config_path())
+        ensure_config_valid(cfg)
+
+        issues: list[dict[str, str]] = []
+        pairs: dict[str, tuple[Any, str]] = {}
+        if payload_obj is not None:
+            pairs["payload"] = (payload_obj, "")
+        elif cfg.payload_file is not None and Path(str(cfg.payload_file)).is_file():
+            raw = Path(str(cfg.payload_file)).read_text(encoding="utf-8")
+            import json as _json
+
+            pairs["payload"] = (_json.loads(raw), raw)
+        if headers_obj is not None:
+            pairs["headers"] = (headers_obj, "")
+        elif cfg.headers_file is not None and Path(str(cfg.headers_file)).is_file():
+            raw = Path(str(cfg.headers_file)).read_text(encoding="utf-8")
+            import json as _json
+
+            pairs["headers"] = (_json.loads(raw), raw)
+        validator = TemplateValidator(build_default_registry(), faker_locale=cfg.faker_locale)
+        report = validator.validate(pairs)
+        for issue in report.issues:
+            issues.append(
+                {
+                    "location": issue.location,
+                    "token": issue.token,
+                    "problem": issue.problem,
+                    **({"suggestions": "|".join(issue.suggestions)} if issue.suggestions else {}),
+                }
+            )
+    except PlaceholderError as exc:
+        return ValidationResponse(ok=False, errors=[{"message": exc.message}])
+    except BlazeHammerError as exc:
+        raise blaze_to_http(exc) from exc
+    return ValidationResponse(ok=not issues, issues=issues)

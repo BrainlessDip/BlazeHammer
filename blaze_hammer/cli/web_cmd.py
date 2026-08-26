@@ -1,4 +1,4 @@
-"""``web`` command — launch the Blaze Hammer Web GUI."""
+"""``web`` command — launch the headless Blaze Hammer API/WebSocket server."""
 
 from __future__ import annotations
 
@@ -14,11 +14,8 @@ from blaze_hammer.errors import EXIT_OK, BlazeHammerError
 @config_options
 @click.option("--host", default=None, help="Bind address (default: 127.0.0.1).")
 @click.option("--port", type=int, default=None, help="Port (default: 8080; 0 = auto).")
-@click.option("--username", default=None, help="Web username override.")
-@click.option("--password", default=None, help="Web password override (hashed in memory).")
-@click.option(
-    "--open", "open_browser", is_flag=True, default=False, help="Open the dashboard in a browser."
-)
+@click.option("--username", default=None, help="API username override.")
+@click.option("--password", default=None, help="API password override (hashed in memory).")
 @click.option(
     "--yes-i-know",
     is_flag=True,
@@ -27,7 +24,7 @@ from blaze_hammer.errors import EXIT_OK, BlazeHammerError
 )
 @click.pass_context
 def web(ctx: click.Context, **kwargs: Any) -> None:
-    """Launch the Web GUI for this project."""
+    """Start the Blaze Hammer API + WebSocket server for this project."""
     overrides = explicit_overrides(ctx)
     profile: str | None = overrides.pop("profile", None)
     config_path: str | None = overrides.pop("config_path", None)
@@ -44,7 +41,7 @@ def web(ctx: click.Context, **kwargs: Any) -> None:
     if web_overrides:
         overrides["web"] = web_overrides
 
-    # Drop run-only options that config_options injects but web ignores.
+    # Drop run-only options that config_options injects but the server ignores.
     for run_only in (
         "method",
         "payload_file",
@@ -78,7 +75,6 @@ def web(ctx: click.Context, **kwargs: Any) -> None:
     ):
         overrides.pop(run_only, None)
 
-    open_browser = bool(kwargs.get("open_browser"))
     yes_i_know = bool(kwargs.get("yes_i_know"))
 
     from blaze_hammer.output.console import make_console, render_error
@@ -86,7 +82,7 @@ def web(ctx: click.Context, **kwargs: Any) -> None:
 
     try:
         cfg = build_run_config(overrides, profile=profile, config_path=config_path)
-        code = run_web_server(cfg, open_browser=open_browser, yes_i_know=yes_i_know)
+        code = run_web_server(cfg, yes_i_know=yes_i_know)
     except BlazeHammerError as error:
         render_error(make_console(), error, debug=bool(kwargs.get("debug")))
         ctx.exit(error.exit_code)

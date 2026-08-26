@@ -920,28 +920,26 @@ def profiles_create(name: str) -> int:
 # -------------------------------------------------------------------- web --
 
 
-def run_web_server(cfg: RunConfig, *, open_browser: bool = False, yes_i_know: bool = False) -> int:
-    """Start the Web GUI (blocking); returns a process exit code."""
+def run_web_server(cfg: RunConfig, *, yes_i_know: bool = False) -> int:
+    """Start the headless API/WebSocket server (blocking); returns exit code."""
     import socket
-    import threading
-    import webbrowser
     from pathlib import Path as _Path
 
     from blaze_hammer.config.project import find_project_config
-    from blaze_hammer.web.app import create_app
+    from blaze_hammer.web.app import create_app, server_info
     from blaze_hammer.web.config import resolve_web_settings
 
     settings = resolve_web_settings(cfg)
     if not settings.enabled:
         raise ConfigurationError(
-            "Web GUI is disabled",
+            "API server is disabled",
             reason="web.enabled is false in blazehammer.yaml",
             hint="enable it or start the server with explicit settings",
         )
 
     if settings.auth.enabled and not settings.auth_ready:
         raise ConfigurationError(
-            "Web authentication is enabled but credentials are not configured",
+            "Authentication is enabled but credentials are not configured",
             reason="web.auth needs 'username' plus 'password' or 'password_hash'",
             hint=(
                 "set them in blazehammer.yaml (or via "
@@ -953,14 +951,14 @@ def run_web_server(cfg: RunConfig, *, open_browser: bool = False, yes_i_know: bo
 
     if not settings.auth.enabled and settings.host in ("0.0.0.0", "::"):
         raise ConfigurationError(
-            "Refusing to expose the control panel on all interfaces without authentication",
+            "Refusing to expose the API on all interfaces without authentication",
             reason=f"host={settings.host} with web.auth.enabled=false",
             hint="re-run with --yes-i-know if this machine is isolated",
         )
 
     project_file = find_project_config()
 
-    # Resolve port 0 up front so the printed URL is real.
+    # Resolve port 0 up front so the printed URLs are real.
     port = settings.port
     if port == 0:
         probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -986,22 +984,24 @@ def run_web_server(cfg: RunConfig, *, open_browser: bool = False, yes_i_know: bo
         project_file=project_file,
     )
 
+    display_host = "127.0.0.1" if settings.host in ("0.0.0.0", "::") else settings.host
+    base = f"http://{display_host}:{port}"
     console = make_console()
-    console.print("[bold]Blaze Hammer Web[/bold]\n")
+    info = server_info()
+    console.print(f"[bold]{info['name']} API[/bold] [dim]v{info['version']}[/dim]\n")
     console.print(f"  Project:\n    {project_file if project_file else '(no blazehammer.yaml)'}")
-    console.print(f"  Server:\n    http://{settings.host}:{port}")
+    console.print(f"  Server:\n    {base}")
+    console.print(f"  API:\n    {base}/api/v1")
+    console.print(f"  WebSocket:\n    ws://{display_host}:{port}/api/v1/ws")
+    console.print(f"  Docs:\n    {base}/docs")
     auth_line = "enabled" if settings.auth.enabled else "DISABLED"
     style = "green" if settings.auth.enabled else "yellow"
     console.print(f"  Authentication:\n    [{style}]{auth_line}[/{style}]")
+    console.print("\n[dim]Headless API server - no UI is served.[/dim]")
     console.print("\n[dim]Press Ctrl+C to stop.[/dim]")
-
-    if open_browser:
-
-        def _open() -> None:
-            display_host = "127.0.0.1" if settings.host in ("0.0.0.0", "::") else settings.host
-            webbrowser.open(f"http://{display_host}:{port}")
-
-        threading.Timer(1.0, _open).start()
+    console.print("[dim]The Python project only provides the backend API.[/dim]")
+    console.print("[dim]You need to run the separate frontend project to use the Web UI.[/dim]")
+    console.print("[dim]Frontend repository: <repo-url>[/dim]")
 
     try:
         import uvicorn
@@ -1009,7 +1009,7 @@ def run_web_server(cfg: RunConfig, *, open_browser: bool = False, yes_i_know: bo
         uvicorn.run(app, host=settings.host, port=port, log_level="warning")
     except OSError as exc:
         raise ConfigurationError(
-            f"Unable to start Web GUI on {settings.host}:{port}",
+            f"Unable to start API server on {settings.host}:{port}",
             reason=str(exc),
             hint="the port may already be in use; try --port 0 to auto-assign",
         ) from exc

@@ -65,7 +65,16 @@ def _make_handler(state: _State):
                 elif parsed.path.startswith("/status/"):
                     self._respond(int(parsed.path.split("/")[2]), {"ok": True})
                 elif parsed.path == "/echo":
-                    self._respond(200, {"echo": True})
+                    self._respond(
+                        200,
+                        {"echo": True},
+                        extra_headers={
+                            "Set-Cookie": "sid=super-secret",
+                            "X-Secret-Token": "top-secret",
+                            "Server": "BlazeTest/1.0",
+                            "Location": "/somewhere",
+                        },
+                    )
                 elif parsed.path == "/flaky":
                     with state.lock:
                         state.flaky_count += 1
@@ -76,6 +85,32 @@ def _make_handler(state: _State):
                         self._respond(200, {"attempt": attempt})
                 elif parsed.path == "/big":
                     self._respond(200, {"data": "x" * 50000})
+                elif parsed.path == "/binary":
+                    body = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
+                    self.send_response(200)
+                    self.send_header("Content-Type", "image/png")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                elif parsed.path == "/badutf8":
+                    body = b"\xff\xfe\xfa\x01"
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/plain")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                elif parsed.path == "/charset":
+                    body = b"caf\xe9"  # 'café' in latin-1
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/plain; charset=latin-1")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                elif parsed.path == "/empty":
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
                 else:
                     self._respond(404, {"error": "not found"})
             finally:

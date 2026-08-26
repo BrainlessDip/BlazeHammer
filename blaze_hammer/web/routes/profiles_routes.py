@@ -13,7 +13,7 @@ from blaze_hammer.errors import ProfileError
 from blaze_hammer.web.dependencies import WebState, get_state, require_session
 from blaze_hammer.web.models import ProfileDetail, ProfileSummary
 
-router = APIRouter(prefix="/api/profiles")
+router = APIRouter(prefix="/profiles")
 
 
 @router.get("", response_model=list[ProfileSummary])

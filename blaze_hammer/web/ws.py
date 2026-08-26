@@ -21,6 +21,23 @@ CLOSE_UNAUTHENTICATED = 4401
 CLOSE_EXPIRED = 4402
 
 
+def _catalog_event(state: Any) -> dict[str, Any]:
+    """Cached ``placeholder.catalog`` frame; never let it kill a connection."""
+    try:
+        from blaze_hammer.services import build_run_config
+        from blaze_hammer.templating.catalog import get_catalog_event
+
+        locale: str | None = None
+        try:
+            cfg = build_run_config({}, profile=None, config_path=state.config_path())
+            locale = cfg.faker_locale
+        except Exception:  # noqa: BLE001 - broken YAML must not break /ws
+            locale = None
+        return get_catalog_event(locale)
+    except Exception:  # noqa: BLE001 - metadata is best-effort on connect
+        return {"type": "placeholder.catalog", "version": 0}
+
+
 class Hub:
     """Fan-out bus from run lifecycle to every connected client."""
 
@@ -67,6 +84,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
             "runs": manager.list_summaries(),
         }
     )
+    await ws.send_json(_catalog_event(state))
 
     queue = state.hub.subscribe()
 

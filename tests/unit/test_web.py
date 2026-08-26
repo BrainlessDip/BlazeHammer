@@ -31,7 +31,7 @@ def _project(tmp_path, target: str) -> None:
     )
     (tmp_path / "payload.json").write_text('{"n": "{int(min=5,max=5)}"}', encoding="utf-8")
     (tmp_path / "headers.json").write_text('{"X-Test": "{uuid}"}', encoding="utf-8")
-    (tmp_path / "profiles").mkdir()
+    (tmp_path / "profiles").mkdir(exist_ok=True)
     (tmp_path / "profiles" / "heavy.json").write_text('{"requests": 9}', encoding="utf-8")
 
 
@@ -65,7 +65,7 @@ def _make_client(
     client.__enter__()
     if enabled and do_login:
         resp = client.post(
-            "/api/auth/login",
+            "/api/v1/auth/login",
             json={"username": username, "password": password},
             headers=XRW,
         )
@@ -152,11 +152,13 @@ def test_bh_web_short_env_prefix():
 
 
 def test_health_is_public(anon):
-    assert anon.get("/api/health").json()["ok"] is True
+    data = anon.get("/api/v1/health").json()
+    assert data["status"] == "ok"
+    assert data["service"] == "blaze-hammer"
 
 
 def test_protected_endpoints_require_session(noauth):
-    for path in ("/api/me", "/api/config", "/api/profiles", "/api/runs"):
+    for path in ("/api/v1/me", "/api/v1/config", "/api/v1/profiles", "/api/v1/runs"):
         r = noauth.get(path)
         assert r.status_code == 401, path
 
@@ -169,7 +171,7 @@ def test_login_success_sets_cookie(authed):
 def _wait_finished(client, run_id: str, timeout: float = 15.0) -> dict[str, Any]:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        summary = client.get(f"/api/runs/{run_id}").json()
+        summary = client.get(f"/api/v1/runs/{run_id}").json()
         if summary["status"] != "running":
             return summary
         time.sleep(0.1)
@@ -183,12 +185,14 @@ def test_login_failure_uniform_message(tmp_path, server_url):
     client.__enter__()
     try:
         r = client.post(
-            "/api/auth/login",
+            "/api/v1/auth/login",
             json={"username": "admin", "password": "WRONG"},
             headers=XRW,
         )
         assert r.status_code == 401
-        assert r.json()["detail"] == "Invalid credentials"
+        err = r.json()["error"]
+        assert err["code"] == "NOT_AUTHENTICATED"
+        assert err["message"] == "Invalid credentials"
     finally:
         client.__exit__(None, None, None)
 
@@ -201,12 +205,12 @@ def test_login_lockout_after_failures(tmp_path, server_url):
     try:
         for _ in range(5):
             client.post(
-                "/api/auth/login",
+                "/api/v1/auth/login",
                 json={"username": "admin", "password": "bad"},
                 headers=XRW,
             )
         locked = client.post(
-            "/api/auth/login",
+            "/api/v1/auth/login",
             json={"username": "admin", "password": "bad"},
             headers=XRW,
         )
@@ -216,27 +220,28 @@ def test_login_lockout_after_failures(tmp_path, server_url):
 
 
 def test_logout_invalidates_session(authed):
-    assert authed.get("/api/me").json()["username"]
-    authed.post("/api/auth/logout", headers=XRW)
-    assert authed.get("/api/me").status_code == 401
+    assert authed.get("/api/v1/me").json()["username"]
+    authed.post("/api/v1/auth/logout", headers=XRW)
+    assert authed.get("/api/v1/me").status_code == 401
 
 
 def test_csrf_header_required(authed):
-    r = authed.post("/api/runs", json={})
+    r = authed.post("/api/v1/runs", json={})
     assert r.status_code == 403
 
 
 def test_security_headers_present(anon):
-    r = anon.get("/api/health")
+    r = anon.get("/api/v1/health")
     assert r.headers["x-content-type-options"] == "nosniff"
     assert r.headers["x-frame-options"] == "DENY"
-    assert "default-src 'self'" in r.headers["content-security-policy"]
+    # API-only server: nothing scriptable is served, so lock everything down.
+    assert "default-src 'none'" in r.headers["content-security-policy"]
 
 
 def test_oversized_body_rejected(authed):
     big = "x" * (8 * 1024 * 1024 + 10)
     r = authed.post(
-        "/api/config/save", content=big, headers={**XRW, "Content-Type": "application/json"}
+        "/api/v1/config/save", content=big, headers={**XRW, "Content-Type": "application/json"}
     )
     assert r.status_code == 413
 
@@ -252,37 +257,43 @@ def test_docs_gated_behind_auth(noauth):
 
 
 def test_config_endpoint_reflects_project(authed):
-    data = authed.get("/api/config").json()
+    data = authed.get("/api/v1/config").json()
     assert data["method"] == "GET"
     assert data["requests"] == 4
     assert data["web_enabled"] is True
 
 
 def test_templates_endpoint_returns_file_text(authed):
-    data = authed.get("/api/config/templates").json()
+    data = authed.get("/api/v1/config/templates").json()
     assert data["payload_text"] == '{"n": "{int(min=5,max=5)}"}'
 
 
 def test_profiles_list_and_show(authed):
-    listed = authed.get("/api/profiles").json()
+    listed = authed.get("/api/v1/profiles").json()
     assert [p["name"] for p in listed] == ["heavy"]
-    shown = authed.get("/api/profiles/heavy").json()
+    shown = authed.get("/api/v1/profiles/heavy").json()
     assert shown["data"]["requests"] == 9
-    assert authed.get("/api/profiles/nope").status_code == 404
+    assert authed.get("/api/v1/profiles/nope").status_code == 404
 
 
-def test_config_save_requires_confirm_then_writes(authed, tmp_path):
-    pre = authed.post("/api/config/save", json={}, headers=XRW)
-    assert pre.status_code == 428
-    ok = authed.post(
-        "/api/config/save",
-        json={"confirm": True, "requests": 77},
-        headers=XRW,
-    )
-    assert ok.status_code == 200
-    text = (tmp_path / "blazehammer.yaml").read_text(encoding="utf-8")
-    assert "requests: 77" in text
-    # The regenerated file must still parse through the real loader.
+def test_config_save_is_a_patch(authed, tmp_path):
+    """PATCH semantics: only provided fields change; formatting survives."""
+    original = (tmp_path / "blazehammer.yaml").read_text(encoding="utf-8")
+    assert "requests:" in original
+
+    resp = authed.post("/api/v1/config/save", json={"requests": 77}, headers=XRW)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["ok"] is True and body["changed"] == ["requests"]
+    assert len(body["config_revision"]) == 64
+
+    updated = (tmp_path / "blazehammer.yaml").read_text(encoding="utf-8")
+    assert "requests: 77" in updated
+    assert "target:" in updated and "concurrency:" in updated
+    # Line count unchanged → nothing else was touched.
+    assert len(original.splitlines()) == len(updated.splitlines())
+
+    # The patched file must still parse through the real loader.
     build_config({}, environ={}, config_path=str(tmp_path / "blazehammer.yaml"))
 
 
@@ -297,7 +308,7 @@ def test_preview_resolves_placeholders(authed):
         "payload_text": '{"user": "{letters(length=3)}"}',
         "count": 2,
     }
-    out = authed.post("/api/preview", json=body, headers=XRW).json()
+    out = authed.post("/api/v1/preview", json=body, headers=XRW).json()
     assert len(out["plans"]) == 2, out
     for plan in out["plans"]:
         value = plan["body"]["user"]
@@ -308,7 +319,7 @@ def test_run_lifecycle_rest_then_ws_events(authed):
     """Phase 1 (REST): run reaches completion. Phase 2 (WS): live events."""
     # Phase 1 — REST-driven run, poll to completion.
     started = authed.post(
-        "/api/runs",
+        "/api/v1/runs",
         json={"requests": 4, "concurrency": 2, "seed": 7},
         headers=XRW,
     )
@@ -318,18 +329,18 @@ def test_run_lifecycle_rest_then_ws_events(authed):
     assert summary["status"] == "completed"
     assert summary["completed"] == 4 and summary["success"] == 4
 
-    log = authed.get(f"/api/runs/{first_id}/log").json()["entries"]
+    log = authed.get(f"/api/v1/runs/{first_id}/log").json()
     assert len(log) == 4
     assert log[0]["ok"] is True
     assert "request_headers" in log[0]
 
     # Phase 2 — WS subscriber sees live events for a fresh small run.
-    with authed.websocket_connect("/ws") as ws:
+    with authed.websocket_connect("/api/v1/ws") as ws:
         hello = ws.receive_json()
         assert hello["type"] == "hello"
 
         second = authed.post(
-            "/api/runs",
+            "/api/v1/runs",
             json={"requests": 2, "concurrency": 2},
             headers=XRW,
         )
@@ -357,10 +368,10 @@ def test_stop_running_flow(authed, server_url):
         f'target: "{slow_target}"\nmethod: GET\nrequests: 50\nconcurrency: 4\n',
         encoding="utf-8",
     )
-    started = authed.post("/api/runs", json={}, headers=XRW).json()
+    started = authed.post("/api/v1/runs", json={}, headers=XRW).json()
     run_id = started["run_id"]
     time.sleep(0.4)
-    stopped = authed.post(f"/api/runs/{run_id}/stop", headers=XRW)
+    stopped = authed.post(f"/api/v1/runs/{run_id}/stop", headers=XRW)
     assert stopped.status_code == 200
     summary = _wait_finished(authed, run_id)
     assert summary["status"] == "stopped"
@@ -372,12 +383,12 @@ def test_second_start_rejected_while_running(authed, server_url):
         f'target: "{server_url}/slow?ms=200"\nmethod: GET\nrequests: 30\nconcurrency: 2\n',
         encoding="utf-8",
     )
-    first = authed.post("/api/runs", json={}, headers=XRW)
+    first = authed.post("/api/v1/runs", json={}, headers=XRW)
     assert first.status_code == 200
-    second = authed.post("/api/runs", json={}, headers=XRW)
+    second = authed.post("/api/v1/runs", json={}, headers=XRW)
     assert second.status_code == 400
     rid = first.json()["run_id"]
-    authed.post(f"/api/runs/{rid}/stop", headers=XRW)
+    authed.post(f"/api/v1/runs/{rid}/stop", headers=XRW)
     _wait_finished(authed, rid)
 
 
@@ -385,7 +396,7 @@ def test_ws_unauthenticated_closed(noauth):
     from starlette.websockets import WebSocketDisconnect
 
     try:
-        with noauth.websocket_connect("/ws"):
+        with noauth.websocket_connect("/api/v1/ws"):
             raise AssertionError("expected pre-accept rejection")
     except WebSocketDisconnect as exc:
         assert exc.code == 4401
@@ -393,19 +404,19 @@ def test_ws_unauthenticated_closed(noauth):
 
 def test_clear_history(authed, server):
     authed.post(
-        "/api/runs",
+        "/api/v1/runs",
         json={"requests": 1, "concurrency": 1},
         headers=XRW,
     ).json()
     # wait briefly for completion
-    runs = authed.get("/api/runs").json()["runs"]
+    runs = authed.get("/api/v1/runs").json()["runs"]
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline and runs and runs[0]["status"] == "running":
         time.sleep(0.1)
-        runs = authed.get("/api/runs").json()["runs"]
-    cleared = authed.delete("/api/runs", headers=XRW)
+        runs = authed.get("/api/v1/runs").json()["runs"]
+    cleared = authed.delete("/api/v1/runs", headers=XRW)
     assert cleared.status_code == 200
-    assert authed.get("/api/runs").json()["runs"] == []
+    assert authed.get("/api/v1/runs").json()["runs"] == []
 
 
 # ---------------------------------------------------------------------------
@@ -418,6 +429,166 @@ def test_cli_web_routing_forms_equivalent():
     assert _route_legacy(["--web", "--port", "9000"]) == ["web", "--port", "9000"]
     assert _route_legacy(["web"])[0] == "web"
     assert _route_legacy(["--version"]) == ["--version"]
+
+
+# ---------------------------------------------------------------------------
+# API-only server contract (v1.5 split)
+# ---------------------------------------------------------------------------
+
+
+def test_root_is_json_api_info(anon):
+    r = anon.get("/")
+    assert r.headers["content-type"].startswith("application/json")
+    data = r.json()
+    assert data["name"] == "Blaze Hammer"
+    assert data["status"] == "ok"
+    assert data["api"] == "/api/v1"
+    assert data["websocket"] == "/api/v1/ws"
+    assert "<html" not in r.text.lower()
+
+
+def test_no_frontend_assets_served(anon):
+    assert anon.get("/index.html").status_code == 404
+    assert anon.get("/static/app.js").status_code == 404
+
+
+def test_info_endpoint(anon):
+    data = anon.get("/api/v1/info").json()
+    assert data["api_version"] == "v1"
+    assert data["features"]["websocket"] is True
+    assert data["features"]["profiles"] is True
+
+
+def test_error_envelope_shape(anon, authed):
+    missing = anon.get("/api/v1/runs/does-not-exist")
+    body = missing.json()
+    assert body["ok"] is False
+    assert body["error"]["code"] == "NOT_FOUND"
+    assert isinstance(body["error"]["message"], str)
+
+    bad = authed.post("/api/v1/runs", json={"requests": -5}, headers=XRW)
+    err = bad.json()["error"]
+    assert err["code"] in ("VALIDATION_ERROR", "BAD_REQUEST")
+
+
+def test_config_exposes_no_secrets(authed):
+    raw = authed.get("/api/v1/config").text.lower()
+    for needle in ("password", "password_hash", "secret-pw"):
+        assert needle not in raw
+
+
+def test_validate_endpoint_ok_and_bad(authed):
+    ok = authed.post(
+        "/api/v1/validate",
+        json={"payload_text": '{"n": "{int(min=1,max=2)}"}'},
+        headers=XRW,
+    ).json()
+    assert ok["ok"] is True
+
+    bad = authed.post(
+        "/api/v1/validate",
+        json={"payload_text": '{"x": "{otp(length=0)}"}'},
+        headers=XRW,
+    ).json()
+    assert bad["ok"] is False and bad["issues"]
+
+
+def test_validate_accepts_full_form_payload(authed):
+    """Regression: flat `retries` int from GUI forms must not 400 (#user-report)."""
+    body = {
+        "target": "https://example.com/api",
+        "method": "GET",
+        "post_type": "json",
+        "faker_locale": "en_US",
+        "requests": 100,
+        "concurrency": 10,
+        "delay": 0,
+        "timeout": 10,
+        "retries": 0,
+        "headers_text": '{\n  "X-Test": "{uuid}"\n}\n',
+        "payload_text": '{"username": "{username(length=10)}", "age": "{int(min=18, max=80)}"}\n',
+    }
+    resp = authed.post("/api/v1/validate", json=body, headers=XRW)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["ok"] is True
+
+
+def test_run_start_with_retries_and_error_detail(authed):
+    """Start accepts the same shape; config errors surface their reason."""
+    ok = authed.post(
+        "/api/v1/runs",
+        json={"requests": 2, "concurrency": 2, "retries": 1},
+        headers=XRW,
+    )
+    assert ok.status_code == 200, ok.text
+    run_id = ok.json()["run_id"]
+    authed.post(f"/api/v1/runs/{run_id}/stop", headers=XRW)
+    _wait_finished(authed, run_id)
+
+    bad = authed.post(
+        "/api/v1/runs",
+        json={"target": "not-a-url", "requests": 2},
+        headers=XRW,
+    )
+    assert bad.status_code == 400
+    message = bad.json()["error"]["message"]
+    assert "Invalid configuration" in message
+    assert "target" in message.lower()
+
+
+def test_multiple_ws_clients_all_receive_broadcast(authed):
+    with authed.websocket_connect("/api/v1/ws") as ws_a:
+        assert ws_a.receive_json()["type"] == "hello"
+        with authed.websocket_connect("/api/v1/ws") as ws_b:
+            assert ws_b.receive_json()["type"] == "hello"
+
+            started = authed.post(
+                "/api/v1/runs",
+                json={"requests": 2, "concurrency": 2},
+                headers=XRW,
+            )
+            run_id = started.json()["run_id"]
+
+            def collect(ws):
+                events = []
+                deadline = time.monotonic() + 15
+                while time.monotonic() < deadline:
+                    ev = ws.receive_json()
+                    events.append(ev)
+                    if ev.get("type") in ("run.completed", "run.error"):
+                        return events
+                return events
+
+            events_a = collect(ws_a)
+            events_b = collect(ws_b)
+            starts_a = [e for e in events_a if e["type"] == "run.started"]
+            starts_b = [e for e in events_b if e["type"] == "run.started"]
+            assert starts_a and starts_b
+            assert starts_a[0]["run_id"] == run_id == starts_b[0]["run_id"]
+
+
+def test_cors_headers_respect_origin_list(tmp_path, server_url):
+
+    from fastapi.testclient import TestClient as TC
+
+    from blaze_hammer.web.app import create_app as ca
+
+    _project(tmp_path, f"{server_url}/echo")
+    overrides = {"web": {"cors": {"enabled": True}}}
+    cfg = build_config(overrides, environ={}, config_path=tmp_path / "blazehammer.yaml")
+    settings = resolve_web_settings(cfg, environ={})
+    app = ca(settings=settings, project_dir=tmp_path, project_file=tmp_path / "blazehammer.yaml")
+
+    client = TC(app)
+    client.__enter__()
+    try:
+        allowed = client.get("/api/v1/health", headers={"Origin": "http://localhost:5173"})
+        assert allowed.headers.get("access-control-allow-origin") == "http://localhost:5173"
+
+        denied = client.get("/api/v1/health", headers={"Origin": "https://evil.test"})
+        assert "access-control-allow-origin" not in denied.headers
+    finally:
+        client.__exit__(None, None, None)
 
 
 # ---------------------------------------------------------------------------

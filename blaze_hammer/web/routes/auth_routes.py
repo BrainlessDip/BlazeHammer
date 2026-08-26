@@ -8,7 +8,7 @@ from blaze_hammer.web.auth import SESSION_COOKIE
 from blaze_hammer.web.dependencies import WebState, get_state, require_session
 from blaze_hammer.web.models import LoginRequest, LoginResponse, MeResponse, OkResponse
 
-router = APIRouter(prefix="/api")
+router = APIRouter(prefix="")
 
 
 def _client_key(request: Request) -> str:
@@ -78,4 +78,4 @@ async def me(request: Request) -> MeResponse:
 
 @router.get("/health")
 async def health() -> dict[str, object]:
-    return {"ok": True, "service": "blaze-hammer-web"}
+    return {"status": "ok", "service": "blaze-hammer"}

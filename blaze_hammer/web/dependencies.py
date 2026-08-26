@@ -87,3 +87,20 @@ def authenticate_websocket(ws: WebSocket, state: WebState) -> bool:
         return True
     token = ws.cookies.get(SESSION_COOKIE)
     return state.sessions.get(token) is not None
+
+
+def blaze_to_http(exc: Any) -> HTTPException:
+    """Convert a core BlazeHammerError into an API error, keeping details.
+
+    The reason/hint carry the actionable part ("retries: Input should be
+    ..."); dropping them turns every failure into a useless generic message.
+    """
+    from blaze_hammer.errors import BlazeHammerError
+
+    assert isinstance(exc, BlazeHammerError)
+    message = exc.message
+    if exc.reason:
+        message = f"{message}\n{exc.reason}"
+    if exc.hint:
+        message = f"{message}\nHint: {exc.hint}"
+    return HTTPException(status_code=400, detail=message)

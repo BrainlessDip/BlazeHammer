@@ -21,6 +21,31 @@ class Method(StrEnum):
     POST = "POST"
 
 
+class ResponseLoggingMode(StrEnum):
+    NONE = "none"
+    ERRORS = "errors"
+    ALL = "all"
+
+
+class ResponseLoggingOptions(BaseModel):
+    """Per-run response snapshot policy (``response_logging:`` YAML section).
+
+    ``mode='errors'`` keeps excerpts for failed/non-success responses only;
+    bodies are never read at all under ``none``. Byte caps bound memory and
+    storage regardless of mode.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: ResponseLoggingMode = ResponseLoggingMode.ERRORS
+    max_body_bytes: int = Field(4096, ge=64, le=1_000_000)
+    max_headers: int = Field(20, ge=0, le=100)
+    #: Overrides the built-in response-header allowlist when non-empty.
+    allow_headers: tuple[str, ...] = ()
+    #: JSON keys redacted inside excerpts (case-insensitive); off by default.
+    redact_keys: tuple[str, ...] = ()
+
+
 class PostType(StrEnum):
     JSON = "json"
     FORM = "form"
@@ -82,9 +107,13 @@ class WebCors(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
+    #: Explicit browser origins permitted with credentials. Development
+    #: defaults cover local React/Vite servers; production must set these.
     allow_origins: tuple[str, ...] = (
-        "http://localhost:8080",
-        "http://127.0.0.1:8080",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
     )
 
 
@@ -129,13 +158,18 @@ class RunConfig(BaseModel):
     retries: RetryPolicy = Field(default_factory=RetryPolicy)
     preview: PreviewOptions = Field(default_factory=PreviewOptions)
     output: OutputOptions = Field(default_factory=OutputOptions)
+    response_logging: ResponseLoggingOptions = Field(default_factory=ResponseLoggingOptions)
     web: WebOptions = Field(default_factory=WebOptions)
 
     @property
     def needs_bodies(self) -> bool:
         """Whether response bodies must be captured at all."""
         out = self.output
-        return bool(out.print_response or out.save_responses_dir)
+        return bool(
+            out.print_response
+            or out.save_responses_dir
+            or self.response_logging.mode != ResponseLoggingMode.NONE
+        )
 
     @property
     def prints_per_request(self) -> bool:

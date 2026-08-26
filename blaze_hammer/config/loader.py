@@ -45,6 +45,8 @@ ENV_FIELDS: dict[str, tuple[tuple[str, ...], type]] = {
     "WEB_PORT": (("web", "port"), int),
     "WEB_USERNAME": (("web", "auth", "username"), str),
     "WEB_PASSWORD": (("web", "auth", "password"), str),
+    "RESPONSE_LOG": (("response_logging", "mode"), str),
+    "RESPONSE_BODY_LIMIT": (("response_logging", "max_body_bytes"), int),
 }
 
 

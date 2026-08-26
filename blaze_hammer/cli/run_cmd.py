@@ -114,6 +114,16 @@ def run(ctx: click.Context, url: str | None, **_kwargs: Any) -> None:
     if retries_max is not None:
         overrides["retries"] = {"max_retries": retries_max}
 
+    response_log = overrides.pop("response_log", None)
+    response_body_limit = overrides.pop("response_body_limit", None)
+    if response_log is not None or response_body_limit is not None:
+        rl: dict[str, Any] = {}
+        if response_log is not None:
+            rl["mode"] = str(response_log).lower()
+        if response_body_limit is not None:
+            rl["max_body_bytes"] = response_body_limit
+        overrides["response_logging"] = rl
+
     output: dict[str, Any] = {}
     for key in _OUTPUT_KEYS:
         value = overrides.pop(key, None)

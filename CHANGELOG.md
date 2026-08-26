@@ -1,5 +1,108 @@
 # Changelog
 
+## 1.6.0 — Response snapshots & run history
+
+Every completed request now stores a bounded response snapshot alongside the
+existing statistics, exposed through the run-log API and WebSocket events.
+
+### Added
+
+- **Response snapshots**: status code, monotonic-timed `response_time_ms`,
+  allowlisted `headers`, `content_type`, wire-accurate `body_size`, and a
+  size-capped `response_body_excerpt` with an explicit
+  `response_body_truncated` flag.
+- **`response_logging:` config section** (`mode: none|errors|all` — default
+  `errors`; `max_body_bytes: 4096`; `max_headers: 20`;
+  `allow_headers:`/`redact_keys:` overrides) with CLI flags
+  (`--response-log`, `--response-body-limit`) and env vars
+  (`BLAZE[_HAMMER]_RESPONSE_LOG`, `_RESPONSE_BODY_LIMIT`). `none` skips
+  body reads entirely; caps bound memory/storage in every mode.
+- **Binary safety**: image/audio/video/octet-stream/zip/pdf responses are
+  never read or decoded — the connection closes immediately and the excerpt
+  becomes `[binary response omitted]`.
+- **Charset handling**: excerpts decode using the declared charset
+  (fallback UTF-8); undecodable payloads become
+  `[unable to decode response body]`. Runs never crash on bad bytes.
+- **Optional JSON key redaction** inside excerpts via `redact_keys`
+  (off by default; only parses small JSON bodies).
+- **Run summary aggregates**: `average/min/max_response_time_ms` and
+  `status_codes` on `GET /runs/{id}` (additive).
+- **Typed log API**: `GET /runs/{id}/log` now returns `ResponseSnapshot`
+  models (same entries, documented shape).
+
+### Fixed
+
+- Runner marked every completed HTTP exchange as success regardless of
+  status; non-2xx/3xx responses now count as failed in stats and summaries.
+
+### Changed
+
+- WebSocket `request.completed` events gained optional
+  `content_type`/`body_size`/excerpt fields (excerpt clamped to 1024 chars,
+  present only when the logging mode stores it).
+
+## 1.5.0 — Headless API server (frontend split)
+
+The Python package now ships **only the backend**: core + CLI + REST/WebSocket
+API. The web UI moves to a separate React project that consumes this server.
+No HTML, JS, CSS or static assets are served anymore.
+
+### Changed
+
+- **API-only server**: `bh web` / `bh --web` start the FastAPI+uvicorn
+  backend; the startup banner prints Server/API/WebSocket/Docs URLs and no
+  longer offers `--open`. `GET /` returns a JSON service descriptor instead
+  of a page.
+- **Versioned surface**: all routes now live under `/api/v1/...`
+  (`health`, `info`, `auth/*`, `config*`, `profiles*`, `runs*`,
+  `preview`, `validate`); the WebSocket is `/api/v1/ws`.
+- **Consistent error envelope**: every HTTP error returns
+  `{"error": {"code": "…", "message": "…"}}` with stable machine codes
+  (`NOT_AUTHENTICATED`, `VALIDATION_ERROR`, `RATE_LIMITED`, …); validation
+  failures report field paths without leaking internals; unexpected
+  exceptions become opaque `INTERNAL_ERROR`.
+- **CORS**: `web.cors.origins:` (alias of `allow_origins:`) configures
+  browser origins for the split deployment; development defaults cover
+  localhost React/Vite ports; credentials-aware (no wildcard).
+- **Security headers** tightened for an API (`default-src 'none'`);
+  `/docs` and `/redoc` remain session-gated.
+
+### Added
+
+- `GET /api/v1/info`: name/version/api-version/feature flags for clients.
+- `POST /api/v1/validate`: full pre-flight (config, files, placeholder
+  resolution) over inline templates or project files — never sends traffic.
+- **Template save API**: `GET /api/v1/config/templates` now returns
+  SHA-256 `payload_revision`/`headers_revision` plus project-relative paths;
+  new `POST /api/v1/config/templates/save` persists editor content with
+  JSON-syntax validation (422 with line/column), optimistic concurrency
+  (409 `TEMPLATE_CONFLICT` echoing `current_revision`), atomic tmp→fsync→
+  rename writes, partial saves, formatting/placeholder preservation, and a
+  `config.changed` WebSocket broadcast (names only). Backed by the reusable
+  `blaze_hammer/files/templates.py` service.
+- **Placeholder catalog**: `blaze_hammer/templating/catalog.py` derives
+  built-in metadata from the live registry and Faker entries dynamically
+  from the installed Faker + custom providers (signature-inspected,
+  side-effect-free, cached per locale). Exposed via
+  `GET /api/v1/placeholders/catalog` and pushed as a
+  `placeholder.catalog` WebSocket event after `hello`.
+- **Config PATCH API**: `POST /api/v1/config/save` is now a field-level
+  update — round-trip YAML editing (ruamel) preserves comments, ordering,
+  quoting and unknown/custom keys; only explicitly provided fields change
+  (`model_fields_set` semantics, explicit `null` supported for optionals);
+  nested `web.{host,port,enabled}` merges in place. Adds
+  `config_revision` (GET /config + conflict gate → 409 `CONFIG_CONFLICT`),
+  atomic writes, no-op patches that never touch the file, and
+  `config.changed` broadcasts listing exactly the changed field names.
+- Backend contract documentation in the README (endpoints, auth, WS event
+  protocol, error format, two-terminal dev workflow).
+
+### Removed
+
+- `blaze_hammer/web/templates/` and `blaze_hammer/web/static/` plus their
+  serving routes; the embedded dashboard is superseded by the external
+  React frontend.
+
 ## 1.4.0 — Web GUI (`bh web`)
 
 A production-grade local control panel built as a transport layer over the

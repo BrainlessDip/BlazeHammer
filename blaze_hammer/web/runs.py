@@ -9,6 +9,7 @@ only adds identity, status tracking and event fan-out.
 from __future__ import annotations
 
 import asyncio
+import json
 import secrets
 import time
 from collections import OrderedDict, deque
@@ -29,6 +30,65 @@ LOG_BUFFER = 200
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
+
+
+#: Above this size JSON excerpts are left as raw text (perf guard).
+_MAX_REDACT_PARSE_BYTES = 65_536
+
+
+def response_snapshot_fields(
+    outcome: Any, *, response_logging: Any, sensitive_names: tuple[str, ...] = ()
+) -> dict[str, Any]:
+    """Build the response-snapshot portion of a log entry.
+
+    Pure function over a ``RequestOutcome`` — no I/O, safe under concurrency.
+    Storage of the excerpt follows the configured mode:
+
+        none   → never stored
+        errors → stored for failed/non-success responses
+        all    → always stored (still byte-capped)
+    """
+    snap = outcome.body
+    content_type = snap.content_type if snap is not None else None
+    body_size = (snap.total_bytes or 0) if snap is not None else 0
+
+    fields: dict[str, Any] = {
+        "content_type": content_type,
+        "body_size": body_size,
+        "response_headers": dict(snap.headers) if snap is not None else {},
+        "response_body_excerpt": None,
+        "response_body_truncated": False,
+    }
+
+    mode = str(response_logging.mode)
+    if mode == "none":  # no bodies at all; size/type still explain the payload
+        return fields
+    should_store = mode == "all" or not outcome.ok
+    if not should_store or snap is None or snap.text is None:
+        return fields
+
+    text = snap.text
+    redact_keys = tuple(response_logging.redact_keys or ())
+    small_enough = len(text) <= _MAX_REDACT_PARSE_BYTES
+    if redact_keys and content_type and "json" in content_type.lower() and small_enough:
+        try:
+            parsed = json.loads(text)
+            masked: Any = None
+            if isinstance(parsed, dict):
+                masked = redact_mapping(parsed, redact_keys)
+            elif isinstance(parsed, list):
+                masked = [
+                    redact_mapping(item, redact_keys) if isinstance(item, dict) else item
+                    for item in parsed
+                ]
+            if masked is not None:
+                text = json.dumps(masked, ensure_ascii=False, separators=(",", ":"))
+        except ValueError:
+            pass  # not really JSON; keep the raw excerpt
+
+    fields["response_body_excerpt"] = text
+    fields["response_body_truncated"] = bool(snap.truncated)
+    return fields
 
 
 @dataclass
@@ -94,6 +154,7 @@ class RunHandle:
 
     def summary(self) -> dict[str, Any]:
         stats = self.live_stats()
+        latency = stats.get("latency_ms") or {}
         return {
             "run_id": self.run_id,
             "status": self.status,
@@ -103,6 +164,10 @@ class RunHandle:
             "completed": stats["completed"],
             "success": stats["success"],
             "failed": stats["failed"],
+            "average_response_time_ms": latency.get("mean"),
+            "min_response_time_ms": latency.get("min"),
+            "max_response_time_ms": latency.get("max"),
+            "status_codes": stats.get("status_codes", {}),
             "error": self.error,
         }
 
@@ -228,9 +293,9 @@ class RunManager:
             entry["request_headers"] = redact_mapping(outcome.resolved_headers, sensitive)
         if outcome.resolved_payload is not None:
             entry["request_body"] = redact_mapping(outcome.resolved_payload, sensitive)
-        body = outcome.body.text if outcome.body else None
-        if body is not None:
-            entry["response_body_excerpt"] = body[:2000]
+
+        snap = response_snapshot_fields(outcome, response_logging=handle.cfg.response_logging)
+        entry.update(snap)
         handle.log.append(entry)
         handle.total_logged += 1
 
@@ -245,6 +310,15 @@ class RunManager:
         }
         if outcome.error_category is not None:
             event["error_category"] = outcome.error_category
+        if entry.get("content_type") is not None:
+            event["content_type"] = entry["content_type"]
+        event["body_size"] = entry.get("body_size", 0)
+        excerpt = entry.get("response_body_excerpt")
+        if excerpt is not None:
+            # Compact copy for the wire; the full (capped) excerpt lives in
+            # the run log endpoint.
+            event["response_body_excerpt"] = str(excerpt)[:1024]
+            event["response_body_truncated"] = entry.get("response_body_truncated", False)
         asyncio.get_running_loop().create_task(self._publish(event))
 
     def _trim_history(self) -> None:

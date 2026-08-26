@@ -74,6 +74,20 @@ def config_options(f: Callable[..., Any]) -> Callable[..., Any]:
         click.option("-t", "--timeout", type=float, default=None, help="Per-request timeout (s)."),
         click.option("--seed", type=int, default=None, help="Seed for reproducible generation."),
         click.option(
+            "--response-log",
+            "response_log",
+            type=click.Choice(["none", "errors", "all"], case_sensitive=False),
+            default=None,
+            help="Response snapshot mode (default: errors).",
+        ),
+        click.option(
+            "--response-body-limit",
+            "response_body_limit",
+            type=click.IntRange(64, 1_000_000),
+            default=None,
+            help="Max response-body bytes kept per request (default: 4096).",
+        ),
+        click.option(
             "--faker-locale",
             "faker_locale",
             type=str,

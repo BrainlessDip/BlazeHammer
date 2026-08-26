@@ -1,0 +1,6 @@
+{
+  "Content-Type": "application/json",
+  "Accept": "application/json",
+  "X-Request-ID": "{uuid}",
+  "X-Test-User": "{faker.name_nonbinary}"
+}

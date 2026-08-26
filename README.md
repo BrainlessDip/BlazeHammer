@@ -627,46 +627,169 @@ per request; failures land in `errors.jsonl`.
 
 ---
 
-## Web GUI
+## Web API server (headless)
 
-Launch a local control panel over the same project and engine as the CLI:
+`bh web` starts a **backend-only** FastAPI + WebSocket server over the same
+project and engine as the CLI. The Python package contains no web UI — the
+dashboard is a separate React project that consumes this API.
 
 ```bash
 bh web                 # http://127.0.0.1:8080 (defaults from blazehammer.yaml)
 bh --web               # identical shortcut
-blaze-hammer web --port 9000 --open
+blaze-hammer web --port 9000
 ```
 
-The dashboard provides: live statistics via WebSocket (requests/success/failed,
-rate, latency percentiles, status histogram), start/stop controls, request log
-with filters and redacted per-request details, payload/header JSON editors with
-placeholder **preview** through the real planner, profile selection, and an
-explicit *Save to Config* action that regenerates `blazehammer.yaml` after
-confirmation.
+Startup banner:
 
-### web configuration (blazehammer.yaml)
+```text
+Blaze Hammer API  v1.5.0
+
+  Project:       ./blazehammer.yaml
+  Server:        http://127.0.0.1:8080
+  API:           http://127.0.0.1:8080/api/v1
+  WebSocket:     ws://127.0.0.1:8080/api/v1/ws
+  Docs:          http://127.0.0.1:8080/docs
+  Authentication: enabled
+```
+
+### REST surface (`/api/v1`)
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `/api/v1/health` | public | liveness probe |
+| GET | `/api/v1/info` | public | name/version/features |
+| POST | `/api/v1/auth/login` | public | session cookie login |
+| POST | `/api/v1/auth/logout` | session | drop session |
+| GET | `/api/v1/auth/me` | session | current user |
+| GET | `/api/v1/config` | session | resolved run config (no secrets) |
+| GET | `/api/v1/config/templates` | session | editor text + SHA-256 revisions |
+| POST | `/api/v1/config/templates/save` | session+CSRF | atomic template save (422 invalid JSON / 409 conflict) |
+| GET | `/api/v1/placeholders/catalog` | session | autocomplete metadata: built-ins + dynamic Faker discovery |
+| POST | `/api/v1/config/save` | session+CSRF | PATCH-style YAML update (round-trip safe) |
+| GET | `/api/v1/profiles[/{name}]` | session | list/show profiles |
+| POST | `/api/v1/runs` | session+CSRF | start run → `{run_id, status}` |
+| GET | `/api/v1/runs[/{id}]` | session | history / single run |
+| POST | `/api/v1/runs/{id}/stop` | session+CSRF | cooperative stop |
+| DELETE | `/api/v1/runs` | session+CSRF | clear history |
+| GET | `/api/v1/runs/{id}/log` | session | response snapshots per request (bounded) |
+| POST | `/api/v1/preview` | session+CSRF | resolve sample requests |
+| POST | `/api/v1/validate` | session+CSRF | full pre-flight check |
+
+Errors use one envelope: `{"error": {"code": "NOT_AUTHENTICATED",
+"message": "…"}}`. Mutating endpoints require the `X-Requested-With:
+XMLHttpRequest` header (CSRF guard).
+
+### WebSocket `ws://…/api/v1/ws`
+
+Session-cookie authenticated; stable JSON events:
+
+```json
+{"type": "run.started",   "run_id": "abc123", "requested": 1000}
+{"type": "stats.updated", "run_id": "abc123", "completed": 420, "success": 415,
+ "failed": 5, "rps": 82.4, "latency_ms": {"p50": 118, "p95": 240}}
+{"type": "request.completed", "run_id": "abc123", "seq": 7, "index": 6,
+ "ok": true, "status": 200, "latency_ms": 124}
+{"type": "run.completed", "run_id": "abc123", "status": "completed"}
+```
+
+Multiple simultaneous clients are supported; state lives server-side, so a
+page refresh recovers via `GET /api/v1/runs`.
+
+### Configuration PATCH
+
+`POST /api/v1/config/save` updates only the fields you send — it never
+rewrites the whole file. Comments, key order, quoting, blank lines and
+unknown/custom keys survive via round-trip YAML (ruamel). Send
+`config_revision` (from `GET /api/v1/config`) for optimistic concurrency:
+mismatches get `409 CONFIG_CONFLICT` with `current_revision`. Explicit
+`null` clears an optional value; omitted means unchanged. Empty patches
+rewrite nothing. Successful changes broadcast `config.changed` with only
+the changed field names.
+
+### Response snapshots
+
+Every request stores a bounded snapshot: status, monotonic-timed latency,
+allowlisted response headers (`content-type`, `content-length`, `server`,
+`location`, …), wire `body_size`, and a size-capped body excerpt with an
+explicit truncation flag. Binary responses are never read or decoded
+(`"[binary response omitted]"`); undecodable text becomes
+`"[unable to decode response body]"`.
+
+```yaml
+response_logging:
+  mode: errors        # none | errors | all   (default: errors)
+  max_body_bytes: 4096
+  max_headers: 20
+  # allow_headers: [content-type, server]   # overrides the default allowlist
+  # redact_keys: [password, token]          # JSON keys masked in excerpts
+```
+
+CLI: `--response-log all --response-body-limit 8192`. Bodies are never read
+at all under `mode: none`; caps apply in every mode. Successful saves of the
+config PATCH preserve this section like any other.
+
+### Template persistence & revisions
+
+Editors load text **plus a `payload_revision`/`headers_revision`** (SHA-256 of
+the file contents). Saves send the revision they loaded:
+
+```json
+POST /api/v1/config/templates/save
+{ "payload": "{\n  \"id\": \"{uuid}\"\n}", "payload_revision": "1ba045…" }
+```
+
+```json
+{ "ok": true, "saved": ["payload"], "payload_revision": "b2c70a…", "headers_revision": null }
+```
+
+- Only supplied fields are written; formatting is preserved verbatim (a
+  trailing newline is added), placeholders untouched.
+- Malformed JSON → `422 INVALID_JSON` with file/line/column.
+- File changed since load → `409 TEMPLATE_CONFLICT` echoing
+  `current_revision`; never silently overwritten.
+- Writes are atomic (tmp → fsync → rename). On success all connected
+  WebSocket clients receive `{"type": "config.changed", "changed":
+  ["payload"]}` (names only, never contents).
+
+### Placeholder catalog
+
+`GET /api/v1/placeholders/catalog` returns built-in entries from the real
+registry plus every Faker method discovered dynamically from the installed
+Faker (incl. custom providers in `blaze_hammer/ext/providers.py`), grouped by
+provider family with signature-derived parameters — cached per locale,
+invalidated on configuration changes. The same frame is pushed as a
+`placeholder.catalog` WebSocket event right after `hello`.
+
+### Configuration
 
 ```yaml
 web:
   enabled: true
-  host: "127.0.0.1"     # never default-exposed; 0.0.0.0 requires --yes-i-know w/o auth
-  port: 8080            # 0 = auto-assign a free port
+  host: "127.0.0.1"
+  port: 8080            # 0 = auto-assign
   auth:
     enabled: true
     username: admin
-    password: change-me          # hashed in memory at startup; never logged/written
-    # password_hash: "scrypt$..."  # pre-hashed alternative
+    password_hash: "scrypt$..."   # or plaintext `password:` (hashed in memory)
   cors:
-    enabled: false
+    enabled: true
+    origins: ["http://localhost:5173"]
 ```
 
-Precedence follows the standard chain — CLI > env (`BLAZE_HAMMER_WEB_*`,
-`BLAZE_WEB_*`, or short `BH_WEB_*`) > YAML > defaults. Authentication is
-enforced server-side on every API route **and** the `/ws` socket
-(HTTP-only SameSite=Strict session cookie, scrypt-hashed passwords, login
-rate limiting, CSRF header check, auth-gated `/docs`). With auth enabled but
-no credentials configured the server refuses to start rather than inventing
-defaults.
+Precedence is the standard chain — CLI > env (`BLAZE_HAMMER_WEB_*`,
+`BLAZE_WEB_*`, `BH_WEB_*`) > YAML > defaults. Authentication is enforced
+server-side on every route **and** the socket; with auth enabled but no
+credentials configured the server refuses to start.
+
+### Development workflow (separate frontend repo)
+
+```bash
+# Terminal 1 — backend
+cd blaze-hammer && bh web
+
+# Terminal 2 — frontend
+cd blaze-hammer-web && npm run dev     # talks to http://127.0.0.1:8080
+```
 
 ## Interactive mode
 

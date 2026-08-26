@@ -25,7 +25,11 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from blaze_hammer.engine.client import BodySnapshot, read_body_snapshot
+from blaze_hammer.engine.client import (
+    BodySnapshot,
+    read_body_snapshot,
+    select_header_allowlist,
+)
 from blaze_hammer.engine.errors import classify_exception, describe_exception
 from blaze_hammer.engine.planner import RequestPlan, RequestPlanner
 from blaze_hammer.engine.rate_limiter import TokenBucket
@@ -79,6 +83,9 @@ class LoadTestRunner:
         self._observers = tuple(observers)
         self.stop_event = asyncio.Event()
         self._scheduled = 0
+        self._response_header_allowlist = select_header_allowlist(
+            cfg.response_logging.allow_headers
+        )
 
     def request_stop(self) -> None:
         """Signal graceful shutdown (signal handlers / interactive)."""
@@ -190,7 +197,11 @@ class LoadTestRunner:
                 delay = retry_delay(policy, attempts, None, response)
                 if delay is None:
                     body = (
-                        await read_body_snapshot(response, self._body_cap())
+                        await read_body_snapshot(
+                            response,
+                            self._body_cap(),
+                            header_allowlist=self._response_header_allowlist,
+                        )
                         if self._cfg.needs_bodies
                         else None
                     )
@@ -199,7 +210,7 @@ class LoadTestRunner:
                         index=plan.index,
                         url=plan.url,
                         method=plan.method,
-                        ok=True,
+                        ok=response.is_success,
                         status_code=response.status_code,
                         latency_s=latency,
                         attempts=attempts + 1,

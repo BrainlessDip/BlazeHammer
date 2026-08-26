@@ -1,0 +1,45 @@
+# Blaze Hammer configuration
+# Docs: https://github.com/blaze-hammer (placeholders: blaze-hammer placeholders)
+
+target: "https://chithi.pockethost.io/api/chithi/users/dipdey"
+
+method: GET
+
+requests: 10
+concurrency: 10
+delay: 0.0
+
+payload: payload.json
+headers: headers.json
+
+post_type: json
+
+timeout: 10
+retries: 0
+
+faker:
+  locale: en_US
+
+  # Set a number for reproducible generated data (--seed overrides this).
+  # seed: 12345
+
+output:
+  simple: false
+
+  # Optional result file (.json or .csv)
+  # file: results.json
+
+web:
+  enabled: true
+  host: "127.0.0.1" # bind 0.0.0.0 only if you understand the risk
+  port: 8080
+
+  auth:
+    enabled: false
+    username: admin
+    password: change-me # hashed in memory at startup, never logged
+    # password_hash: "$scrypt$..." # pre-hashed alternative
+
+  cors:
+    enabled: false
+faker_locale: en_US

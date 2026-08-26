@@ -60,12 +60,17 @@ ALLOWED_TOP_KEYS = frozenset(
         "preview",
         "output",
         "web",
+        "response_logging",
     }
+)
+
+ALLOWED_RESPONSE_LOGGING_KEYS = frozenset(
+    {"mode", "max_body_bytes", "max_headers", "allow_headers", "redact_keys"}
 )
 
 ALLOWED_WEB_KEYS = frozenset({"enabled", "host", "port", "auth", "cors"})
 ALLOWED_WEB_AUTH_KEYS = frozenset({"enabled", "username", "password", "password_hash"})
-ALLOWED_WEB_CORS_KEYS = frozenset({"enabled", "allow_origins"})
+ALLOWED_WEB_CORS_KEYS = frozenset({"enabled", "allow_origins", "origins"})
 
 ALLOWED_FAKER_KEYS = frozenset({"locale", "seed"})
 ALLOWED_OUTPUT_KEYS = frozenset(
@@ -104,8 +109,13 @@ def find_project_config(start: Path | None = None) -> Path | None:
     return candidate if candidate.is_file() else None
 
 
-def load_project_yaml(path: Path) -> dict[str, Any]:
-    """Load and normalize a project YAML file into merge-ready fragments."""
+def load_project_yaml(path: Path, *, strict: bool = True) -> dict[str, Any]:
+    """Load and normalize a project YAML file into merge-ready fragments.
+
+    ``strict=False`` skips unknown-key rejection (custom keys are dropped
+    from the returned fragment but remain untouched in the file) — used by
+    the Web editor so user extensions never break reads.
+    """
     try:
         text = path.read_text(encoding="utf-8")
     except FileNotFoundError as exc:
@@ -130,7 +140,7 @@ def load_project_yaml(path: Path) -> dict[str, Any]:
             reason=f"top level must be a mapping, got {type(data).__name__}",
             hint=f"see 'blaze-hammer init' for an example {PROJECT_FILE_NAME}",
         )
-    return _normalize(data, base_dir=path.resolve().parent)
+    return _normalize(data, base_dir=path.resolve().parent, strict=strict)
 
 
 def _yaml_error(path: Path, exc: Exception) -> ConfigurationError:
@@ -147,10 +157,19 @@ def _yaml_error(path: Path, exc: Exception) -> ConfigurationError:
     )
 
 
-def _check_unknown(keys: Iterable[str], allowed: frozenset[str], where: str, label: str) -> None:
+def _check_unknown(
+    keys: Iterable[str],
+    allowed: frozenset[str],
+    where: str,
+    label: str,
+    *,
+    strict: bool = True,
+) -> None:
     unknown = [key for key in keys if key not in allowed]
     if not unknown:
         return
+    if not strict:
+        return  # editor path: tolerate custom keys, they must survive saves
     lines = []
     for key in unknown:
         close = difflib.get_close_matches(key, sorted(allowed), n=1, cutoff=0.6)
@@ -189,27 +208,33 @@ def _resolve_path(raw: Any, base_dir: Path, key: str) -> Any:
     return candidate.resolve()
 
 
-def _normalize(data: dict[str, Any], *, base_dir: Path) -> dict[str, Any]:
+def _normalize(data: dict[str, Any], *, base_dir: Path, strict: bool = True) -> dict[str, Any]:
     expanded: dict[str, Any] = {}
     for key, value in data.items():
         canonical = TOP_LEVEL_ALIASES.get(key, key)
         expanded[canonical] = value
-    _check_unknown(expanded.keys(), ALLOWED_TOP_KEYS, "top level", "configuration")
+    _check_unknown(expanded.keys(), ALLOWED_TOP_KEYS, "top level", "configuration", strict=strict)
 
     out: dict[str, Any] = {}
     for key, value in expanded.items():
         if value is None:
             continue
+        if not strict and key not in ALLOWED_TOP_KEYS:
+            continue  # custom keys stay in the file, out of validation
         if key == "faker":
             faker = _require_mapping(value, "faker")
-            _check_unknown(faker.keys(), ALLOWED_FAKER_KEYS, "faker:", "faker")
+            _check_unknown(faker.keys(), ALLOWED_FAKER_KEYS, "faker:", "faker", strict=strict)
+            if not strict:
+                faker = {k: v for k, v in faker.items() if k in ALLOWED_FAKER_KEYS}
             if "locale" in faker and faker["locale"] is not None:
                 out["faker_locale"] = faker["locale"]
             if "seed" in faker and faker["seed"] is not None:
                 out["seed"] = faker["seed"]
         elif key == "output":
             output = _require_mapping(value, "output")
-            _check_unknown(output.keys(), ALLOWED_OUTPUT_KEYS, "output:", "output")
+            _check_unknown(output.keys(), ALLOWED_OUTPUT_KEYS, "output:", "output", strict=strict)
+            if not strict:
+                output = {k: v for k, v in output.items() if k in ALLOWED_OUTPUT_KEYS}
             fragment: dict[str, Any] = {}
             for okey, ovalue in output.items():
                 if ovalue is None:
@@ -225,34 +250,66 @@ def _normalize(data: dict[str, Any], *, base_dir: Path) -> dict[str, Any]:
                 out["retries"] = {"max_retries": value}
                 continue
             retries = _require_mapping(value, "retries")
-            _check_unknown(retries.keys(), ALLOWED_RETRY_KEYS, "retries:", "retries")
+            _check_unknown(retries.keys(), ALLOWED_RETRY_KEYS, "retries:", "retries", strict=strict)
+            if not strict:
+                retries = {k: v for k, v in retries.items() if k in ALLOWED_RETRY_KEYS}
             fragment_r = {k: v for k, v in retries.items() if v is not None}
             if fragment_r:
                 out["retries"] = fragment_r
         elif key == "preview":
             preview = _require_mapping(value, "preview")
+            if not strict:
+                preview = {k: v for k, v in preview.items() if k in ("dry_run", "preview_count")}
             fragment_p = {k: v for k, v in preview.items() if v is not None}
             if fragment_p:
                 out["preview"] = fragment_p
         elif key == "web":
             web = _require_mapping(value, "web")
-            _check_unknown(web.keys(), ALLOWED_WEB_KEYS, "web:", "web")
+            _check_unknown(web.keys(), ALLOWED_WEB_KEYS, "web:", "web", strict=strict)
             fragment_w: dict[str, Any] = {}
             for wkey, wvalue in web.items():
                 if wvalue is None:
                     continue
+                if not strict and wkey not in ALLOWED_WEB_KEYS:
+                    continue
                 if wkey == "auth":
                     auth = _require_mapping(wvalue, "web.auth")
-                    _check_unknown(auth.keys(), ALLOWED_WEB_AUTH_KEYS, "web.auth:", "web.auth")
+                    _check_unknown(
+                        auth.keys(), ALLOWED_WEB_AUTH_KEYS, "web.auth:", "web.auth", strict=strict
+                    )
+                    if not strict:
+                        auth = {k: v for k, v in auth.items() if k in ALLOWED_WEB_AUTH_KEYS}
                     fragment_w["auth"] = {k: v for k, v in auth.items() if v is not None}
                 elif wkey == "cors":
                     cors = _require_mapping(wvalue, "web.cors")
-                    _check_unknown(cors.keys(), ALLOWED_WEB_CORS_KEYS, "web.cors:", "web.cors")
-                    fragment_w["cors"] = {k: v for k, v in cors.items() if v is not None}
+                    _check_unknown(
+                        cors.keys(), ALLOWED_WEB_CORS_KEYS, "web.cors:", "web.cors", strict=strict
+                    )
+                    if not strict:
+                        cors = {k: v for k, v in cors.items() if k in ALLOWED_WEB_CORS_KEYS}
+                    cors_fragment = {k: v for k, v in cors.items() if v is not None}
+                    # 'origins:' is the friendlier spelling of allow_origins.
+                    if "origins" in cors_fragment:
+                        cors_fragment["allow_origins"] = cors_fragment.pop("origins")
+                    fragment_w["cors"] = cors_fragment
                 else:
                     fragment_w[wkey] = wvalue
             if fragment_w:
                 out["web"] = fragment_w
+        elif key == "response_logging":
+            rl = _require_mapping(value, "response_logging")
+            _check_unknown(
+                rl.keys(),
+                ALLOWED_RESPONSE_LOGGING_KEYS,
+                "response_logging:",
+                "response_logging",
+                strict=strict,
+            )
+            if not strict:
+                rl = {k: v for k, v in rl.items() if k in ALLOWED_RESPONSE_LOGGING_KEYS}
+            fragment_rl = {k: v for k, v in rl.items() if v is not None}
+            if fragment_rl:
+                out["response_logging"] = fragment_rl
         elif key == "sensitive_keys":
             out[key] = list(value) if isinstance(value, (list, tuple)) else [value]
         elif key in ("payload_file", "headers_file"):

@@ -1,0 +1,2 @@
+target,method,requested,completed,success,failed,retries,duration_s,rps,interrupted,p50_ms,p90_ms,p95_ms,p99_ms
+https://example.com/api,POST,100,100,100,0,0,0.276,362.91,False,20.36,34.139,73.323,80.095
