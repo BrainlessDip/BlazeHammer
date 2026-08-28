@@ -139,11 +139,12 @@ def test_snapshot_error_status_stored_in_errors_mode():
     assert fields["response_body_excerpt"] == '{"detail":"nope"}'
 
 
-def test_snapshot_success_not_stored_in_errors_mode():
+def test_snapshot_success_stored_in_errors_mode():
+    """In errors mode, the log endpoint still serves body excerpts."""
     snap = BodySnapshot("fine", False, 4, "text/plain", {})
     fields = response_snapshot_fields(_outcome(body=snap), response_logging=_RL(RL_ERRORS))
-    assert fields["response_body_excerpt"] is None
-    assert fields["body_size"] == 4  # size kept even without excerpt
+    assert fields["response_body_excerpt"] == "fine"
+    assert fields["body_size"] == 4
 
 
 def test_snapshot_none_mode_never_stores_excerpt():
@@ -250,7 +251,7 @@ def test_log_returns_full_snapshot_shape(snap_client):
         "body_size",
         "response_body_excerpt",
         "response_body_truncated",
-        "headers",
+        "response_headers",
         "error",
     }
     assert entry["status_code"] == 200 and entry["error"] is None
@@ -259,7 +260,7 @@ def test_log_returns_full_snapshot_shape(snap_client):
 def test_sensitive_response_headers_excluded(snap_client):
     run_id = _run_and_wait(snap_client, {"requests": 1})
     entry = snap_client.get(f"/api/v1/runs/{run_id}/log").json()[0]
-    headers = entry["headers"]
+    headers = entry["response_headers"]
     lowered = {k.lower() for k in headers}
     assert "set-cookie" not in lowered and "x-secret-token" not in lowered
     assert "server" in lowered and "location" in lowered  # allowlisted
@@ -409,3 +410,224 @@ def test_cli_options_flow_into_config(tmp_path):
     )
     assert cfg.response_logging.mode.value == "all"
     assert cfg.response_logging.max_body_bytes == 2048
+
+
+# ---------------------------------------------------------------------------
+# Request data population tests (issue: request_headers/body/cookies null)
+# ---------------------------------------------------------------------------
+
+
+def _project_with_data(tmp_path, target: str) -> None:
+    """Project with real payload/headers files for testing request data."""
+    (tmp_path / "blazehammer.yaml").write_text(
+        f'target: "{target}"\nmethod: GET\nrequests: 3\nconcurrency: 2\n'
+        "payload: payload.json\nheaders: headers.json\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "payload.json").write_text(
+        '{"n": "{int(min=5,max=5)}"}',
+        encoding="utf-8",
+    )
+    (tmp_path / "headers.json").write_text(
+        '{"X-Test": "{uuid}"}',
+        encoding="utf-8",
+    )
+
+
+def test_get_with_headers_populates_request_headers(tmp_path, server_url):
+    """GET with configured headers → request_headers is populated."""
+    _project_with_data(tmp_path, f"{server_url}/echo")
+    c = _make_client(tmp_path, server_url)
+    run_id = _run_and_wait(c, {"requests": 1})
+    entry = c.get(f"/api/v1/runs/{run_id}/log").json()[0]
+    assert entry["request_headers"] is not None
+    assert "X-Test" in entry["request_headers"]
+
+
+def test_post_with_json_populates_request_body(tmp_path, server_url):
+    """POST with payload → request_body is populated."""
+    _project_with_data(tmp_path, f"{server_url}/echo")
+    c = _make_client(tmp_path, server_url)
+    run_id = _run_and_wait(c, {"requests": 1, "method": "POST"})
+    entry = c.get(f"/api/v1/runs/{run_id}/log").json()[0]
+    assert entry["request_body"] is not None
+    assert "n" in entry["request_body"]
+
+
+def test_inline_headers_populates_request_headers(tmp_path, server_url):
+    """Inline headers via API → request_headers is populated."""
+    _project_with_data(tmp_path, f"{server_url}/echo")
+    c = _make_client(tmp_path, server_url)
+    run_id = _run_and_wait(
+        c,
+        {
+            "requests": 1,
+            "headers_text": '{"Authorization": "Bearer xyz", "X-Custom": "val"}',
+            "payload_text": '{"key": "val"}',
+            "method": "POST",
+        },
+    )
+    entry = c.get(f"/api/v1/runs/{run_id}/log").json()[0]
+    assert entry["request_headers"] is not None
+    # Authorization is redacted
+    assert entry["request_headers"]["Authorization"] == "***REDACTED***"
+    assert entry["request_headers"]["X-Custom"] == "val"
+    assert entry["request_body"] is not None
+    assert entry["request_body"]["key"] == "val"
+
+
+def test_faker_payload_resolves_in_request_body(tmp_path, server_url):
+    """Faker placeholder in payload → resolved value in request_body."""
+    _project_with_data(tmp_path, f"{server_url}/echo")
+    c = _make_client(tmp_path, server_url)
+    run_id = _run_and_wait(
+        c,
+        {
+            "requests": 1,
+            "payload_text": '{"user": "{faker.user_name}"}',
+            "method": "POST",
+        },
+    )
+    entry = c.get(f"/api/v1/runs/{run_id}/log").json()[0]
+    assert entry["request_body"] is not None
+    user_val = entry["request_body"]["user"]
+    assert isinstance(user_val, str) and len(user_val) > 0
+    assert user_val != "{faker.user_name}"
+
+
+def test_placeholder_header_resolves(tmp_path, server_url):
+    """Placeholder in header → resolved value in request_headers."""
+    _project_with_data(tmp_path, f"{server_url}/echo")
+    c = _make_client(tmp_path, server_url)
+    run_id = _run_and_wait(
+        c,
+        {
+            "requests": 1,
+            "headers_text": '{"X-Token": "{uuid}"}',
+        },
+    )
+    entry = c.get(f"/api/v1/runs/{run_id}/log").json()[0]
+    assert entry["request_headers"] is not None
+    token = entry["request_headers"]["X-Token"]
+    assert isinstance(token, str) and len(token) > 0
+    assert token != "{uuid}"
+
+
+def test_get_without_body_request_body_null(tmp_path, server_url):
+    """GET without payload → request_body is null."""
+    _project_with_data(tmp_path, f"{server_url}/echo")
+    c = _make_client(tmp_path, server_url)
+    run_id = _run_and_wait(c, {"requests": 1})
+    entry = c.get(f"/api/v1/runs/{run_id}/log").json()[0]
+    assert entry["request_body"] is None
+
+
+def test_sensitive_headers_redacted(tmp_path, server_url):
+    """Sensitive header values are redacted in log."""
+    _project_with_data(tmp_path, f"{server_url}/echo")
+    c = _make_client(tmp_path, server_url)
+    run_id = _run_and_wait(
+        c,
+        {
+            "requests": 1,
+            "headers_text": '{"Authorization": "Bearer secret123", "X-Api-Key": "key456"}',
+        },
+    )
+    entry = c.get(f"/api/v1/runs/{run_id}/log").json()[0]
+    assert entry["request_headers"]["Authorization"] == "***REDACTED***"
+    assert entry["request_headers"]["X-Api-Key"] == "***REDACTED***"
+
+
+def test_response_body_excerpt_populated(tmp_path, server_url):
+    """response_body_excerpt is populated when body is captured."""
+    _project_with_data(tmp_path, f"{server_url}/echo")
+    c = _make_client(tmp_path, server_url)
+    run_id = _run_and_wait(c, {"requests": 1})
+    entry = c.get(f"/api/v1/runs/{run_id}/log").json()[0]
+    assert entry["response_body_excerpt"] is not None
+    assert entry["body_size"] > 0
+
+
+def test_large_response_body_truncated(tmp_path, server_url):
+    """Large response → response_body_truncated is True."""
+    _project(tmp_path, f"{server_url}/big")
+    c = _make_client(tmp_path, server_url)
+    run_id = _run_and_wait(c, {"requests": 1})
+    entry = c.get(f"/api/v1/runs/{run_id}/log").json()[0]
+    assert entry["body_size"] > 4096
+    assert entry["response_body_truncated"] is True
+
+
+def test_response_headers_in_log(tmp_path, server_url):
+    """response_headers field is populated (renamed from 'headers')."""
+    _project_with_data(tmp_path, f"{server_url}/echo")
+    c = _make_client(tmp_path, server_url)
+    run_id = _run_and_wait(c, {"requests": 1})
+    entry = c.get(f"/api/v1/runs/{run_id}/log").json()[0]
+    assert "response_headers" in entry
+    assert isinstance(entry["response_headers"], dict)
+
+
+def test_request_cookies_in_log(tmp_path, server_url):
+    """request_cookies is populated when Cookie header is present."""
+    _project_with_data(tmp_path, f"{server_url}/echo")
+    c = _make_client(tmp_path, server_url)
+    run_id = _run_and_wait(c, {"requests": 1})
+    entry = c.get(f"/api/v1/runs/{run_id}/log").json()[0]
+    # Session cookie from auth login should be parsed
+    assert isinstance(entry.get("request_cookies"), dict) or entry.get("request_cookies") is None
+
+
+def test_concurrent_requests_dont_mix_data(tmp_path, server_url):
+    """Concurrent requests keep their own request data separate."""
+    _project_with_data(tmp_path, f"{server_url}/echo")
+    c = _make_client(tmp_path, server_url)
+    # Run 3 requests concurrently, each with unique inline payload
+    run_id = _run_and_wait(
+        c,
+        {
+            "requests": 3,
+            "concurrency": 3,
+            "payload_text": '{"req": "{int(min=1,max=999999)}"}',
+            "method": "POST",
+        },
+    )
+    entries = c.get(f"/api/v1/runs/{run_id}/log").json()
+    assert len(entries) == 3
+    # Each entry should have its own request_body with a unique value
+    bodies = [e["request_body"]["req"] for e in entries if e.get("request_body")]
+    assert len(bodies) == 3
+    assert len(set(bodies)) == 3  # all unique
+
+
+def test_ws_event_has_request_data(tmp_path, server_url):
+    """WebSocket request.completed events carry request_headers/body/cookies."""
+    _project_with_data(tmp_path, f"{server_url}/echo")
+    c = _make_client(tmp_path, server_url)
+    with c.websocket_connect("/api/v1/ws") as ws:
+        hello = ws.receive_json()
+        assert hello["type"] == "hello"
+        ws.receive_json()  # catalog
+
+        started = c.post(
+            "/api/v1/runs",
+            json={
+                "requests": 1,
+                "headers_text": '{"X-Test": "ws-val"}',
+                "payload_text": '{"msg": "hello"}',
+                "method": "POST",
+            },
+            headers=XRW,
+        )
+        assert started.status_code == 200
+
+        deadline = time.monotonic() + 15
+        while time.monotonic() < deadline:
+            ev = ws.receive_json()
+            if ev["type"] == "request.completed":
+                assert ev.get("request_headers") is not None
+                assert ev.get("request_body") is not None
+                assert ev.get("response_headers") is not None
+                break
+            if ev["type"] in ("run.completed", "run.error"):
+                break

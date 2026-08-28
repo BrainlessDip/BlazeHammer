@@ -45,14 +45,21 @@ def validate_config(cfg: RunConfig) -> ValidationOutcome:
             f"{cfg.target} (expected http:// or https:// scheme)",
         )
 
+    from blaze_hammer.config.models import PostType
+
     needs_payload = (
-        cfg.method.value == "POST"
+        cfg.method.supports_body
+        and cfg.post_type != PostType.NONE
         and not cfg.preview.dry_run
         and not cfg.file_payload
         and not cfg.inline_templates
     )
     if needs_payload and cfg.payload_file is None:
-        outcome.add("Payload configured", False, "POST requires --payload or --file-payload")
+        outcome.add(
+            "Payload configured",
+            False,
+            f"{cfg.method.value} with a body requires --payload or --file-payload",
+        )
     else:
         outcome.add("Payload configured", True, str(cfg.payload_file or "-"))
 
@@ -70,11 +77,11 @@ def validate_config(cfg: RunConfig) -> ValidationOutcome:
     elif headers_active:
         outcome.add("Headers file exists", True, str(cfg.headers_file))
 
-    if cfg.file_payload and cfg.post_type.value == "json":
+    if cfg.file_payload and cfg.post_type.value not in ("form", "multipart"):
         outcome.add(
             "Body type",
             False,
-            "--file-payload (multipart) cannot be combined with --post-type json",
+            f"--file-payload requires --post-type form or multipart, got {cfg.post_type.value}",
         )
     else:
         body = "multipart files + form fields" if cfg.file_payload else cfg.post_type.value

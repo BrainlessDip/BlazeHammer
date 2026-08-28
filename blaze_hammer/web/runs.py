@@ -12,6 +12,7 @@ import asyncio
 import json
 import secrets
 import time
+import traceback
 from collections import OrderedDict, deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -25,7 +26,6 @@ if TYPE_CHECKING:
     from blaze_hammer.config.models import RunConfig
 
 HISTORY_LIMIT = 20
-LOG_BUFFER = 200
 
 
 def _now_ms() -> int:
@@ -47,6 +47,9 @@ def response_snapshot_fields(
         none   → never stored
         errors → stored for failed/non-success responses
         all    → always stored (still byte-capped)
+
+    When a body exists and mode is not ``none``, the excerpt is always
+    populated so the log endpoint can serve it regardless of storage mode.
     """
     snap = outcome.body
     content_type = snap.content_type if snap is not None else None
@@ -61,30 +64,34 @@ def response_snapshot_fields(
     }
 
     mode = str(response_logging.mode)
-    if mode == "none":  # no bodies at all; size/type still explain the payload
-        return fields
-    should_store = mode == "all" or not outcome.ok
-    if not should_store or snap is None or snap.text is None:
+    if mode == "none":
         return fields
 
-    text = snap.text
+    # Always populate the excerpt when a body exists (mode != none).
+    # The mode controls *storage gating* (what persists to disk exporters),
+    # but the log endpoint should always serve available body data.
+    if snap is None:
+        return fields
+
     redact_keys = tuple(response_logging.redact_keys or ())
-    small_enough = len(text) <= _MAX_REDACT_PARSE_BYTES
-    if redact_keys and content_type and "json" in content_type.lower() and small_enough:
-        try:
-            parsed = json.loads(text)
-            masked: Any = None
-            if isinstance(parsed, dict):
-                masked = redact_mapping(parsed, redact_keys)
-            elif isinstance(parsed, list):
-                masked = [
-                    redact_mapping(item, redact_keys) if isinstance(item, dict) else item
-                    for item in parsed
-                ]
-            if masked is not None:
-                text = json.dumps(masked, ensure_ascii=False, separators=(",", ":"))
-        except ValueError:
-            pass  # not really JSON; keep the raw excerpt
+    text = snap.text
+    if text is not None:
+        small_enough = len(text) <= _MAX_REDACT_PARSE_BYTES
+        if redact_keys and content_type and "json" in content_type.lower() and small_enough:
+            try:
+                parsed = json.loads(text)
+                masked: Any = None
+                if isinstance(parsed, dict):
+                    masked = redact_mapping(parsed, redact_keys)
+                elif isinstance(parsed, list):
+                    masked = [
+                        redact_mapping(item, redact_keys) if isinstance(item, dict) else item
+                        for item in parsed
+                    ]
+                if masked is not None:
+                    text = json.dumps(masked, ensure_ascii=False, separators=(",", ":"))
+            except ValueError:
+                pass  # not really JSON; keep the raw excerpt
 
     fields["response_body_excerpt"] = text
     fields["response_body_truncated"] = bool(snap.truncated)
@@ -103,8 +110,9 @@ class RunHandle:
     prepared: Any = None  # services.PreparedRun (avoids import cycle)
     task: asyncio.Task[Any] | None = None
     #: Redacted per-request log entries (ring buffer).
-    log: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=LOG_BUFFER))
+    log: deque[dict[str, Any]] = field(default_factory=lambda: deque())
     total_logged: int = 0
+    sample_store: Any = field(default=None, init=False, repr=False)
 
     def live_stats(self) -> dict[str, Any]:
         if self.prepared is None or self.prepared.collector is None:
@@ -155,6 +163,7 @@ class RunHandle:
     def summary(self) -> dict[str, Any]:
         stats = self.live_stats()
         latency = stats.get("latency_ms") or {}
+        sample_count = len(self.sample_store.samples) if self.sample_store is not None else 0
         return {
             "run_id": self.run_id,
             "status": self.status,
@@ -169,6 +178,7 @@ class RunHandle:
             "max_response_time_ms": latency.get("max"),
             "status_codes": stats.get("status_codes", {}),
             "error": self.error,
+            "sample_count": sample_count,
         }
 
 
@@ -205,7 +215,10 @@ class RunManager:
         handle = RunHandle(run_id=run_id, cfg=cfg, requested=cfg.requests)
 
         def bridge(outcome: Any) -> None:  # RequestOutcome; sync, loop thread
-            self._record_outcome(handle, outcome)
+            try:
+                self._record_outcome(handle, outcome)
+            except Exception:
+                traceback.print_exc()
 
         try:
             prepared = services.prepare_run(cfg, observers=[bridge], templates=templates)
@@ -273,11 +286,26 @@ class RunManager:
             return []
         return list(handle.log)[offset:]
 
+    def sample_entries(self, run_id: str) -> list[dict[str, Any]]:
+        handle = self._runs.get(run_id)
+        if handle is None or handle.sample_store is None:
+            return []
+        return handle.sample_store.samples
+
     # -- internals ----------------------------------------------------------
 
     def _record_outcome(self, handle: RunHandle, outcome: Any) -> None:
         planner = getattr(handle.prepared, "planner", None)
         sensitive = planner.sensitive_names if planner is not None else ()
+
+        # Lazily initialise the sample store on first outcome.
+        if handle.sample_store is None and handle.cfg.samples.enabled:
+            from blaze_hammer.web.samples import SampleStore
+
+            handle.sample_store = SampleStore(handle.cfg.samples, sensitive)
+        if handle.sample_store is not None:
+            handle.sample_store.record(outcome)
+
         entry: dict[str, Any] = {
             "index": outcome.index,
             "ok": outcome.ok,
@@ -292,7 +320,12 @@ class RunManager:
         if outcome.resolved_headers:
             entry["request_headers"] = redact_mapping(outcome.resolved_headers, sensitive)
         if outcome.resolved_payload is not None:
-            entry["request_body"] = redact_mapping(outcome.resolved_payload, sensitive)
+            if isinstance(outcome.resolved_payload, dict):
+                entry["request_body"] = redact_mapping(outcome.resolved_payload, sensitive)
+            else:
+                entry["request_body"] = outcome.resolved_payload
+        if outcome.resolved_cookies:
+            entry["request_cookies"] = redact_mapping(outcome.resolved_cookies, sensitive)
 
         snap = response_snapshot_fields(outcome, response_logging=handle.cfg.response_logging)
         entry.update(snap)
@@ -303,10 +336,15 @@ class RunManager:
             "type": "request.completed",
             "run_id": handle.run_id,
             "index": outcome.index,
+            "method": outcome.method,
             "ok": outcome.ok,
             "status": outcome.status_code,
             "latency_ms": entry["latency_ms"],
             "seq": handle.total_logged,
+            "request_headers": entry.get("request_headers"),
+            "request_body": entry.get("request_body"),
+            "request_cookies": entry.get("request_cookies"),
+            "response_headers": snap.get("response_headers", snap.get("headers")),
         }
         if outcome.error_category is not None:
             event["error_category"] = outcome.error_category
@@ -318,7 +356,10 @@ class RunManager:
             # Compact copy for the wire; the full (capped) excerpt lives in
             # the run log endpoint.
             event["response_body_excerpt"] = str(excerpt)[:1024]
-            event["response_body_truncated"] = entry.get("response_body_truncated", False)
+            event["response_body_truncated"] = entry.get(
+                "response_body_truncated",
+                False,
+            )
         asyncio.get_running_loop().create_task(self._publish(event))
 
     def _trim_history(self) -> None:

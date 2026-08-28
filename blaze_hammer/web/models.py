@@ -6,6 +6,10 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from blaze_hammer.config.models import Method
+
+_METHOD_PATTERN = "|".join(Method.allowed_values())
+
 
 class LoginRequest(BaseModel):
     username: str = Field(min_length=1, max_length=128)
@@ -126,7 +130,7 @@ class SaveConfigRequest(BaseModel):
 
     config_revision: str | None = Field(None, min_length=1, max_length=128)
     target: str | None = Field(None, min_length=1, max_length=2048)
-    method: str | None = Field(None, pattern=r"^(GET|POST)$")
+    method: str | None = Field(None, pattern=f"^({_METHOD_PATTERN})$")
     requests: int | None = Field(None, ge=1, le=10_000_000)
     concurrency: int | None = Field(None, ge=1, le=10_000)
     delay: float | None = Field(None, ge=0, le=3600)
@@ -135,7 +139,10 @@ class SaveConfigRequest(BaseModel):
     retries: int | None = Field(None, ge=0, le=10)
     seed: int | None = Field(None, ge=-(2**63), le=2**63 - 1)
     faker_locale: str | None = Field(None, max_length=16)
-    post_type: str | None = Field(None, pattern=r"^(json|form)$")
+    post_type: str | None = Field(
+        None,
+        pattern=r"^(none|json|form|multipart|raw|xml|html|binary)$",
+    )
 
     @field_validator("method", mode="before")
     @classmethod
@@ -183,6 +190,7 @@ class RunSummary(BaseModel):
     min_response_time_ms: float | None = None
     max_response_time_ms: float | None = None
     status_codes: dict[str, int] = Field(default_factory=dict)
+    sample_count: int = 0
 
 
 class RunListResponse(BaseModel):
@@ -199,7 +207,7 @@ class ResponseSnapshot(BaseModel):
     body_size: int = 0
     response_body_excerpt: str | None = None
     response_body_truncated: bool = False
-    headers: dict[str, str] = Field(default_factory=dict)
+    response_headers: dict[str, str] = Field(default_factory=dict)
     error: str | None = None
 
     #: Richer context retained alongside the snapshot.
@@ -209,6 +217,55 @@ class ResponseSnapshot(BaseModel):
     error_category: str | None = None
     request_headers: dict[str, Any] | None = None
     request_body: dict[str, Any] | None = None
+    request_cookies: dict[str, str] | None = None
+
+
+# --------------------------------------------------------------- samples --
+
+
+class SampleRequestBody(BaseModel):
+    text: str | None = None
+    parsed: Any = None
+    truncated: bool = False
+
+
+class SampleResponseBody(BaseModel):
+    text: str | None = None
+    parsed: Any = None
+    truncated: bool = False
+    content_type: str | None = None
+
+
+class SampleRequest(BaseModel):
+    method: str
+    url: str
+    headers: dict[str, Any] = Field(default_factory=dict)
+    body: SampleRequestBody | None = None
+    cookies: dict[str, str] = Field(default_factory=dict)
+
+
+class SampleResponse(BaseModel):
+    status_code: int | None = None
+    headers: dict[str, str] = Field(default_factory=dict)
+    body: SampleResponseBody | None = None
+    content_type: str | None = None
+    size: int = 0
+    truncated: bool = False
+
+
+class RequestSample(BaseModel):
+    """One representative request/response sample stored per run."""
+
+    id: str
+    timestamp: float
+    reason: str
+    duration_ms: float
+    ok: bool
+    attempts: int = 1
+    error: str | None = None
+    error_category: str | None = None
+    request: SampleRequest
+    response: SampleResponse
 
 
 class OkResponse(BaseModel):

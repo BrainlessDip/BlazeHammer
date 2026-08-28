@@ -61,11 +61,16 @@ ALLOWED_TOP_KEYS = frozenset(
         "output",
         "web",
         "response_logging",
+        "samples",
     }
 )
 
 ALLOWED_RESPONSE_LOGGING_KEYS = frozenset(
     {"mode", "max_body_bytes", "max_headers", "allow_headers", "redact_keys"}
+)
+
+ALLOWED_SAMPLES_KEYS = frozenset(
+    {"enabled", "max_per_run", "max_request_body_size", "max_response_body_size"}
 )
 
 ALLOWED_WEB_KEYS = frozenset({"enabled", "host", "port", "auth", "cors"})
@@ -310,6 +315,20 @@ def _normalize(data: dict[str, Any], *, base_dir: Path, strict: bool = True) -> 
             fragment_rl = {k: v for k, v in rl.items() if v is not None}
             if fragment_rl:
                 out["response_logging"] = fragment_rl
+        elif key == "samples":
+            sp = _require_mapping(value, "samples")
+            _check_unknown(
+                sp.keys(),
+                ALLOWED_SAMPLES_KEYS,
+                "samples:",
+                "samples",
+                strict=strict,
+            )
+            if not strict:
+                sp = {k: v for k, v in sp.items() if k in ALLOWED_SAMPLES_KEYS}
+            fragment_sp = {k: v for k, v in sp.items() if v is not None}
+            if fragment_sp:
+                out["samples"] = fragment_sp
         elif key == "sensitive_keys":
             out[key] = list(value) if isinstance(value, (list, tuple)) else [value]
         elif key in ("payload_file", "headers_file"):
@@ -361,13 +380,15 @@ web:
   port: 8080
 
   auth:
-    enabled: true
+    enabled: false
     # username: admin
     # password: change-me          # hashed in memory at startup, never logged
     # password_hash: "$scrypt$..." # pre-hashed alternative
 
   cors:
-    enabled: false
+    enabled: true
+    origins:
+      - "http://localhost:5173"
 """
 
 TEMPLATE_PAYLOAD = """\

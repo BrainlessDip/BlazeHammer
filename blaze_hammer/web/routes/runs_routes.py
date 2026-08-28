@@ -23,6 +23,7 @@ from blaze_hammer.web.models import (
     PreviewPlan,
     PreviewRequest,
     PreviewResponse,
+    RequestSample,
     ResponseSnapshot,
     RunListResponse,
     RunStartRequest,
@@ -125,7 +126,7 @@ async def run_log(run_id: str, request: Request, offset: int = 0) -> list[Respon
                 body_size=e.get("body_size", 0),
                 response_body_excerpt=e.get("response_body_excerpt"),
                 response_body_truncated=e.get("response_body_truncated", False),
-                headers=e.get("response_headers") or {},
+                response_headers=e.get("response_headers") or e.get("headers") or {},
                 error=e.get("error") or e.get("response_error"),
                 ok=e.get("ok", True),
                 attempts=e.get("attempts", 1),
@@ -133,9 +134,20 @@ async def run_log(run_id: str, request: Request, offset: int = 0) -> list[Respon
                 error_category=e.get("error_category"),
                 request_headers=e.get("request_headers"),
                 request_body=e.get("request_body"),
+                request_cookies=e.get("request_cookies"),
             )
         )
     return out
+
+
+@router.get("/runs/{run_id}/samples", response_model=list[RequestSample])
+async def run_samples(run_id: str, request: Request) -> list[RequestSample]:
+    """Representative request/response samples (bounded, not every request)."""
+    require_session(request)
+    state: WebState = get_state(request)
+    assert state.manager is not None
+    entries = state.manager.sample_entries(run_id)
+    return [RequestSample.model_validate(e) for e in entries]
 
 
 @router.post("/preview", response_model=PreviewResponse)
@@ -169,13 +181,20 @@ async def preview(body: PreviewRequest, request: Request) -> PreviewResponse:
         sensitive = prepared.planner.sensitive_names
         plans_out = []
         for plan in prepared.planner.preview_plans(body.count):
+            raw = plan.body_preview
+            if isinstance(raw, dict):
+                body_dict: dict[str, Any] = redact_mapping(raw, sensitive)
+            elif isinstance(raw, str):
+                body_dict = {"_raw": raw}
+            else:
+                body_dict = {}
             plans_out.append(
                 PreviewPlan(
                     index=plan.index,
                     url=plan.url,
                     method=plan.method,
                     headers=redact_mapping(plan.headers or {}, sensitive),
-                    body=redact_mapping(plan.body_preview or {}, sensitive),
+                    body=body_dict,
                 )
             )
     finally:

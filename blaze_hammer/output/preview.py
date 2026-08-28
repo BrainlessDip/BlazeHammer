@@ -53,8 +53,8 @@ def render_request_plans(
                 console.print(f"[dim]... {omitted:,} characters truncated[/dim]")
             console.print()
 
-        if plan.method == "POST" and not body and not dry_run:
-            console.print("[dim]No payload configured for POST.[/dim]\n")
+        if plan.method not in ("GET", "HEAD", "OPTIONS") and not body and not dry_run:
+            console.print(f"[dim]No payload configured for {plan.method}.[/dim]\n")
 
     if dry_run:
         console.print("[bold yellow]DRY RUN - request was not sent.[/bold yellow]")

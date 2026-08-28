@@ -132,7 +132,7 @@ Environment variables accept both prefixes; the plain form wins if both are set:
 | Variable | Maps to |
 |---|---|
 | `BLAZE_HAMMER_TARGET` / `BLAZE_TARGET` | target URL |
-| `BLAZE_HAMMER_METHOD` / `BLAZE_METHOD` | GET/POST |
+| `BLAZE_HAMMER_METHOD` / `BLAZE_METHOD` | GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS, CONNECT, TRACE |
 | `BLAZE_HAMMER_REQUESTS`, `_CONCURRENCY`, `_DELAY`, `_RATE`, `_TIMEOUT`, `_RETRIES`, `_SEED` | numeric fields |
 | `BLAZE_HAMMER_FAKER_LOCALE` | faker locale |
 | `BLAZE_HAMMER_PAYLOAD_FILE`, `_HEADERS_FILE` | template files |

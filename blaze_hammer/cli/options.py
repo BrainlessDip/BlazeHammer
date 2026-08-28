@@ -7,6 +7,10 @@ from typing import Any
 
 import click
 
+from blaze_hammer.config.models import Method
+
+_METHChoices = click.Choice(Method.allowed_values(), case_sensitive=False)
+
 
 def config_options(f: Callable[..., Any]) -> Callable[..., Any]:
     """Options that describe WHAT to send / how to configure a run."""
@@ -22,10 +26,10 @@ def config_options(f: Callable[..., Any]) -> Callable[..., Any]:
         click.option(
             "-m",
             "--method",
-            type=click.Choice(["GET", "POST"], case_sensitive=False),
+            type=_METHChoices,
             default=None,
             show_default=False,
-            help="HTTP method.",
+            help=f"HTTP method ({', '.join(Method.allowed_values())}).",
         ),
         click.option(
             "-p",
@@ -63,9 +67,12 @@ def config_options(f: Callable[..., Any]) -> Callable[..., Any]:
             "-pt",
             "--post-type",
             "post_type",
-            type=click.Choice(["json", "form"], case_sensitive=False),
+            type=click.Choice(
+                ["none", "json", "form", "multipart", "raw", "xml", "html", "binary"],
+                case_sensitive=False,
+            ),
             default=None,
-            help="Body encoding for POST requests.",
+            help="Body encoding: none, json, form, multipart, raw, xml, html, binary.",
         ),
         click.option("-n", "--requests", type=int, default=None, help="Total requests."),
         click.option("-c", "--concurrency", type=int, default=None, help="Max parallel requests."),

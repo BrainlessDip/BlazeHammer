@@ -6,6 +6,10 @@ from pathlib import Path
 
 import click
 
+from blaze_hammer.config.models import Method
+
+_METHChoices = click.Choice(Method.allowed_values(), case_sensitive=False)
+
 
 @click.command(name="init")
 @click.argument("project_name", required=False, metavar="[PROJECT_NAME]")
@@ -21,7 +25,7 @@ import click
 @click.option(
     "-m",
     "--method",
-    type=click.Choice(["GET", "POST"], case_sensitive=False),
+    type=_METHChoices,
     default=None,
     help="HTTP method (default: POST).",
 )
@@ -99,7 +103,7 @@ def init(
             )
         console_method = click.prompt(
             "HTTP method",
-            type=click.Choice(["GET", "POST"], case_sensitive=False),
+            type=_METHChoices,
             default=console_method,
         ).upper()
         console_requests = click.prompt("Requests", type=int, default=console_requests)

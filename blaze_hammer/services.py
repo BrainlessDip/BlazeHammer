@@ -6,6 +6,7 @@ The CLI layer stays free of business logic; every command delegates here.
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import random
 import sys
@@ -21,7 +22,7 @@ from rich.table import Table
 
 from blaze_hammer.config import loader as config_loader
 from blaze_hammer.config.logging_setup import setup_logging
-from blaze_hammer.config.models import RunConfig
+from blaze_hammer.config.models import Method, RunConfig
 from blaze_hammer.config.validation import (
     ensure_config_valid,
     summarize_placeholders,
@@ -986,6 +987,8 @@ def run_web_server(cfg: RunConfig, *, yes_i_know: bool = False) -> int:
 
     display_host = "127.0.0.1" if settings.host in ("0.0.0.0", "::") else settings.host
     base = f"http://{display_host}:{port}"
+    encoded_host = base64.b64encode(base.encode()).decode()
+
     console = make_console()
     info = server_info()
     console.print(f"[bold]{info['name']} API[/bold] [dim]v{info['version']}[/dim]\n")
@@ -994,14 +997,17 @@ def run_web_server(cfg: RunConfig, *, yes_i_know: bool = False) -> int:
     console.print(f"  API:\n    {base}/api/v1")
     console.print(f"  WebSocket:\n    ws://{display_host}:{port}/api/v1/ws")
     console.print(f"  Docs:\n    {base}/docs")
+    console.print(
+        f"  CORS origins: {settings.cors_enabled} | {
+            ', '.join(settings.cors_origins) if settings.cors_origins else '(none)'
+        }"
+    )
     auth_line = "enabled" if settings.auth.enabled else "DISABLED"
     style = "green" if settings.auth.enabled else "yellow"
-    console.print(f"  Authentication:\n    [{style}]{auth_line}[/{style}]")
+    console.print(f"\n  Authentication:\n    [{style}]{auth_line}[/{style}]")
     console.print("\n[dim]Headless API server - no UI is served.[/dim]")
     console.print("\n[dim]Press Ctrl+C to stop.[/dim]")
-    console.print("[dim]The Python project only provides the backend API.[/dim]")
-    console.print("[dim]You need to run the separate frontend project to use the Web UI.[/dim]")
-    console.print("[dim]Frontend repository: <repo-url>[/dim]")
+    console.print(f"Our hosted GUI: https://blazehammer.pages.dev/?host={encoded_host}")
 
     try:
         import uvicorn
@@ -1034,7 +1040,7 @@ def interactive_flow() -> int:
     url = ""
     while not url:
         url = Prompt.ask("Target URL").strip()
-    method = Prompt.ask("Method", choices=["GET", "POST"], default="GET").upper()
+    method = Prompt.ask("Method", choices=list(Method.allowed_values()), default="GET").upper()
     requests = ask_int("Requests", 100)
     concurrency = max(1, ask_int("Concurrency", 10))
 

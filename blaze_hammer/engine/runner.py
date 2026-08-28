@@ -46,6 +46,26 @@ Observer = Callable[["RequestOutcome"], None]
 _MAX_MESSAGE_LEN = 300
 
 
+def _extract_cookies(headers: dict[str, str] | None) -> dict[str, str] | None:
+    """Parse the ``Cookie`` header into a name→value dict.
+
+    Returns ``None`` when no Cookie header is present.  The raw header is
+    **removed** from *headers* so cookies are never double-counted.
+    """
+    if not headers:
+        return None
+    raw = headers.get("cookie") or headers.get("Cookie")
+    if not raw:
+        return None
+    cookies: dict[str, str] = {}
+    for part in raw.split(";"):
+        part = part.strip()
+        if "=" in part:
+            name, _, value = part.partition("=")
+            cookies[name.strip()] = value.strip()
+    return cookies or None
+
+
 @dataclass
 class RequestOutcome:
     index: int
@@ -59,6 +79,7 @@ class RequestOutcome:
     error_message: str | None = None
     resolved_payload: dict | None = None
     resolved_headers: dict | None = None
+    resolved_cookies: dict[str, str] | None = None
     body: BodySnapshot | None = None
 
 
@@ -173,37 +194,61 @@ class LoadTestRunner:
                 queue.task_done()
 
     async def _execute(self, plan: RequestPlan) -> RequestOutcome:
+        from blaze_hammer.config.models import Method, PostType
+
         policy = self._cfg.retries
         files = self._planner.httpx_files()
         attempts = 0
+        method_enum = Method(plan.method)
+        post_type_enum = PostType(plan.post_type)
         while True:
             start = time.perf_counter()
             try:
                 kwargs: dict[str, Any] = {}
-                if plan.method == "POST":
+                if method_enum.supports_body and post_type_enum != PostType.NONE:
                     if files:
                         kwargs["files"] = files
-                    if plan.post_type == "json":
+                    if plan.post_type == PostType.JSON.value:
                         kwargs["json"] = plan.json_body
-                    else:
+                    elif plan.post_type in (
+                        PostType.FORM.value,
+                        PostType.MULTIPART.value,
+                    ):
                         kwargs["data"] = plan.form_data
+                    elif plan.post_type in (
+                        PostType.RAW.value,
+                        PostType.XML.value,
+                        PostType.HTML.value,
+                        PostType.BINARY.value,
+                    ):
+                        kwargs["content"] = plan.content
+                # Inject default Content-Type when user hasn't set one.
+                effective_headers = dict(plan.headers) if plan.headers else {}
+                if (
+                    plan.default_content_type
+                    and "content-type" not in {k.lower() for k in effective_headers}
+                    and "Content-Type" not in effective_headers
+                ):
+                    effective_headers["Content-Type"] = plan.default_content_type
                 response = await self._client.request(
                     plan.method,
                     plan.url,
-                    headers=plan.headers,
+                    headers=effective_headers or None,
                     **kwargs,
                 )
                 latency = time.perf_counter() - start
                 delay = retry_delay(policy, attempts, None, response)
                 if delay is None:
+                    # HEAD responses never carry a body per HTTP spec.
+                    skip_body = plan.method == "HEAD" or not self._cfg.needs_bodies
                     body = (
-                        await read_body_snapshot(
+                        None
+                        if skip_body
+                        else await read_body_snapshot(
                             response,
                             self._body_cap(),
                             header_allowlist=self._response_header_allowlist,
                         )
-                        if self._cfg.needs_bodies
-                        else None
                     )
                     await response.aclose()
                     return RequestOutcome(
@@ -216,6 +261,7 @@ class LoadTestRunner:
                         attempts=attempts + 1,
                         resolved_payload=plan.body_preview,
                         resolved_headers=plan.headers,
+                        resolved_cookies=_extract_cookies(plan.headers),
                         body=body,
                     )
                 self._collector.record_retry()
@@ -262,6 +308,7 @@ class LoadTestRunner:
             error_message=describe_exception(exc)[:_MAX_MESSAGE_LEN],
             resolved_payload=plan.body_preview,
             resolved_headers=plan.headers,
+            resolved_cookies=_extract_cookies(plan.headers),
         )
 
     def _record(self, outcome: RequestOutcome) -> None:

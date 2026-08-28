@@ -19,6 +19,36 @@ MAX_CONCURRENCY = 10_000
 class Method(StrEnum):
     GET = "GET"
     POST = "POST"
+    PUT = "PUT"
+    PATCH = "PATCH"
+    DELETE = "DELETE"
+    HEAD = "HEAD"
+    OPTIONS = "OPTIONS"
+    CONNECT = "CONNECT"
+    TRACE = "TRACE"
+
+    @classmethod
+    def _missing_(cls, value: object) -> Method | None:
+        """Case-insensitive lookup: ``'get'`` → ``GET``."""
+        if isinstance(value, str):
+            for member in cls:
+                if member.value == value.upper():
+                    return member
+        return None
+
+    @classmethod
+    def allowed_values(cls) -> tuple[str, ...]:
+        """Sorted uppercase strings for CLI help / OpenAPI exposure."""
+        return tuple(m.value for m in cls)
+
+    @property
+    def supports_body(self) -> bool:
+        """Methods where a request body is standard."""
+        return self in (Method.POST, Method.PUT, Method.PATCH, Method.DELETE)
+
+
+# Sentinel for methods httpx cannot send (CONNECT/TRACE may fail at transport).
+_BODYLESS: frozenset[Method] = frozenset({Method.HEAD})
 
 
 class ResponseLoggingMode(StrEnum):
@@ -47,8 +77,48 @@ class ResponseLoggingOptions(BaseModel):
 
 
 class PostType(StrEnum):
+    """Request body encoding mode — not POST-specific.
+
+    Each value maps to a distinct httpx body representation and default
+    Content-Type header.
+    """
+
+    NONE = "none"
     JSON = "json"
     FORM = "form"
+    MULTIPART = "multipart"
+    RAW = "raw"
+    XML = "xml"
+    HTML = "html"
+    BINARY = "binary"
+
+    @classmethod
+    def _missing_(cls, value: object) -> PostType | None:
+        if isinstance(value, str):
+            for member in cls:
+                if member.value == value.lower():
+                    return member
+        return None
+
+    @classmethod
+    def allowed_values(cls) -> tuple[str, ...]:
+        return tuple(m.value for m in cls)
+
+    @property
+    def default_content_type(self) -> str | None:
+        """Sensible Content-Type applied when the user hasn't set one."""
+        return _POST_TYPE_CONTENT_TYPES.get(self)
+
+
+_POST_TYPE_CONTENT_TYPES: dict[PostType, str] = {
+    PostType.JSON: "application/json",
+    PostType.FORM: "application/x-www-form-urlencoded",
+    PostType.MULTIPART: "multipart/form-data",
+    PostType.RAW: "text/plain",
+    PostType.XML: "application/xml",
+    PostType.HTML: "text/html",
+    PostType.BINARY: "application/octet-stream",
+}
 
 
 class RetryPolicy(BaseModel):
@@ -117,6 +187,25 @@ class WebCors(BaseModel):
     )
 
 
+class SampleOptions(BaseModel):
+    """Structured request/response sample collection (``samples:`` YAML section).
+
+    Samples are representative records stored per run — not every request.
+    The store keeps bounded counts: first request, first success, first
+    failure, and one per distinct status code.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = True
+    #: Maximum representative samples stored per run.
+    max_per_run: int = Field(20, ge=1, le=500)
+    #: Byte cap for request body excerpts stored inside samples.
+    max_request_body_size: int = Field(65536, ge=256, le=4_000_000)
+    #: Byte cap for response body excerpts stored inside samples.
+    max_response_body_size: int = Field(65536, ge=256, le=4_000_000)
+
+
 class WebOptions(BaseModel):
     """Web GUI server settings (``web:`` section of blazehammer.yaml)."""
 
@@ -159,6 +248,7 @@ class RunConfig(BaseModel):
     preview: PreviewOptions = Field(default_factory=PreviewOptions)
     output: OutputOptions = Field(default_factory=OutputOptions)
     response_logging: ResponseLoggingOptions = Field(default_factory=ResponseLoggingOptions)
+    samples: SampleOptions = Field(default_factory=SampleOptions)
     web: WebOptions = Field(default_factory=WebOptions)
 
     @property

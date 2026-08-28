@@ -20,12 +20,15 @@ class _State:
         self.flaky_count = 0
         self.bodies: list[dict] = []
         self.seen_headers: list[dict] = []
+        self.seen_methods: list[str] = []
 
-    def enter(self) -> None:
+    def enter(self, method: str = "") -> None:
         with self.lock:
             self.requests += 1
             self.current += 1
             self.max_concurrent = max(self.max_concurrent, self.current)
+            if method:
+                self.seen_methods.append(method)
 
     def leave(self) -> None:
         with self.lock:
@@ -53,10 +56,10 @@ def _make_handler(state: _State):
             length = int(self.headers.get("Content-Length", 0))
             return self.rfile.read(length) if length else b""
 
-        def do_GET(self):
+        def _dispatch(self, method: str):
             parsed = urlparse(self.path)
             qs = parse_qs(parsed.query)
-            state.enter()
+            state.enter(method)
             try:
                 state.seen_headers.append(dict(self.headers))
                 if parsed.path == "/slow":
@@ -65,14 +68,42 @@ def _make_handler(state: _State):
                 elif parsed.path.startswith("/status/"):
                     self._respond(int(parsed.path.split("/")[2]), {"ok": True})
                 elif parsed.path == "/echo":
+                    # Read and store POST/PUT/PATCH/DELETE bodies so integration
+                    # tests can inspect what was sent.
+                    if method in ("POST", "PUT", "PATCH", "DELETE"):
+                        raw = self._read_body()
+                        try:
+                            data = json.loads(raw or b"{}")
+                        except json.JSONDecodeError:
+                            data = {}
+                        with state.lock:
+                            state.bodies.append(data)
                     self._respond(
                         200,
-                        {"echo": True},
+                        {"echo": True, "method": method},
                         extra_headers={
                             "Set-Cookie": "sid=super-secret",
                             "X-Secret-Token": "top-secret",
                             "Server": "BlazeTest/1.0",
                             "Location": "/somewhere",
+                        },
+                    )
+                elif parsed.path == "/receive":
+                    raw = self._read_body()
+                    try:
+                        data = json.loads(raw or b"{}")
+                    except json.JSONDecodeError:
+                        data = {}
+                    with state.lock:
+                        state.bodies.append(data)
+                    self._respond(200, {"received": data, "method": method})
+                elif parsed.path == "/headers-check":
+                    self._respond(
+                        200,
+                        {
+                            "method": method,
+                            "allow": "GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS",
+                            "cors_origin": "*",
                         },
                     )
                 elif parsed.path == "/flaky":
@@ -116,17 +147,55 @@ def _make_handler(state: _State):
             finally:
                 state.leave()
 
+        def do_GET(self):
+            self._dispatch("GET")
+
         def do_POST(self):
-            state.enter()
+            self._dispatch("POST")
+
+        def do_PUT(self):
+            self._dispatch("PUT")
+
+        def do_PATCH(self):
+            self._dispatch("PATCH")
+
+        def do_DELETE(self):
+            self._dispatch("DELETE")
+
+        def do_HEAD(self):
+            parsed = urlparse(self.path)
+            state.enter("HEAD")
             try:
-                raw = self._read_body()
-                try:
-                    data = json.loads(raw or b"{}")
-                except json.JSONDecodeError:
-                    data = {}
-                with state.lock:
-                    state.bodies.append(data)
-                self._respond(200, {"received": data})
+                if parsed.path == "/echo":
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", "14")
+                    self.send_header("Server", "BlazeTest/1.0")
+                    self.end_headers()
+                elif parsed.path.startswith("/status/"):
+                    code = int(parsed.path.split("/")[2])
+                    self.send_response(code)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+            finally:
+                state.leave()
+
+        def do_OPTIONS(self):
+            state.enter("OPTIONS")
+            try:
+                self.send_response(200)
+                self.send_header("Allow", "GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS")
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header(
+                    "Access-Control-Allow-Methods",
+                    "GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS",
+                )
+                self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
             finally:
                 state.leave()
 

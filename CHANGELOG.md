@@ -1,5 +1,186 @@
 # Changelog
 
+## 1.10.0 — Expanded body / post-type system
+
+`post_type` is no longer just `json` or `form`. Eight body encodings are now
+supported, each with auto-injected `Content-Type`, placeholder resolution
+across all text types, and consistent integration with the planner, runner,
+Web GUI, CLI, and sample/log pipelines.
+
+### Added
+
+- **Eight `PostType` values**: `none`, `json`, `form`, `multipart`, `raw`,
+  `xml`, `html`, `binary` (was just `json` / `form`).
+- **`PostType._missing_` (case-insensitive)**: `XML` / `Xml` / `xml` all
+  resolve to `PostType.XML`; `PostType.allowed_values()` exposes the
+  sorted set for CLI / OpenAPI.
+- **`PostType.default_content_type`**: built-in `Content-Type` per type
+  (`application/json`, `text/plain`, `application/xml`, `text/html`,
+  `application/octet-stream`, etc.). The runner injects it whenever the
+  user-supplied headers do not already specify one.
+- **Raw text bodies** (`raw`, `xml`, `html`): the payload can be either a
+  JSON-string or a structured object — structured payloads are
+  serialised to JSON for the body bytes. Multipart keeps the
+  `form_data` path (with `data=...` to httpx) so file attachments still
+  work through `--file-payload`.
+- **Binary bodies** (`binary`): the payload is encoded to UTF-8 bytes and
+  sent via httpx `content=...`.
+- **Runner content routing** (`engine/runner.py:_execute`): dispatches
+  `json`, `data`, or `content` httpx kwargs based on `plan.post_type`,
+  with default `Content-Type` injection and a `post_type=none` escape
+  hatch that suppresses body kwargs even on POST/PUT/PATCH/DELETE.
+- **Validation** (`config/validation.py`): `post_type=none` bypasses the
+  "POST with a body requires --payload" check (a `none` POST has no
+  body to configure). `file_payload` now requires `form` or `multipart`.
+- **API model** (`web/models.py`): `SaveConfigRequest.post_type` and
+  `RunSettingsPayload.post_type` accept the full eight-value set.
+- **CLI** (`cli/options.py`): `-pt/--post-type` choices expanded to the
+  full eight-value set; help text updated.
+- **46 new tests** in `tests/unit/test_body_types.py` covering enum
+  membership and case-insensitivity, planner routing per type, all HTTP
+  methods × all body types, default `Content-Type` injection, preview,
+  body-preview property, and validation edge cases.
+
+### Changed
+
+- **`RequestPlan` dataclass** (`engine/planner.py`): adds `raw_body`,
+  `body_bytes`, `content`, and `default_content_type` fields. The
+  `body_preview` property now returns the correct body type per
+  encoding (dict for json/form/multipart, str for raw/xml/html,
+  `[binary N bytes]` marker for binary).
+- **`_record_outcome`** (`web/runs.py`): now handles non-dict
+  `resolved_payload` (raw/xml/html) by storing the string as-is rather
+  than re-running `redact_mapping` (which expects a `Mapping`).
+- **`SampleStore._build_sample`** (`web/samples.py`): same non-dict
+  handling for request body text in samples.
+- **Preview endpoint** (`web/routes/runs_routes.py`): wraps non-dict
+  `body_preview` results into `{"_raw": "<text>"}` so the structured
+  `PreviewPlan.body` remains valid for the React frontend.
+
+## 1.9.0 — Request/response logging fix
+
+Fixes `request_headers`, `request_body`, `request_cookies`, and
+`response_body_excerpt` always being `null` in WebSocket events and run logs.
+These fields now always contain the actual resolved data used by each
+outgoing request.
+
+### Fixed
+
+- **`response_body_excerpt` always null**: `response_snapshot_fields` now
+  populates the excerpt whenever a body exists and `response_logging.mode`
+  is not `none` — the mode previously gated excerpt population for the
+  log endpoint, causing `response_body_excerpt: null` even when
+  `body_size > 0`.
+- **WS event missing `request_cookies`**: `request.completed` events now
+  include the parsed/redacted cookies from the `Cookie` header.
+- **`headers` → `response_headers`**: log entries and WS events now use
+  the canonical `response_headers` field (previously `headers`). The
+  endpoint falls back to `headers` for entries written by older versions.
+
+### Changed
+
+- **`ResponseSnapshot` model** (`web/models.py`): `headers` field renamed
+  to `response_headers`; `request_cookies` added.
+- **`run_log` endpoint**: reads `response_headers` from log entries with
+  fallback to `headers` for backward compatibility.
+- **13 new tests** in `test_response_snapshots.py`: GET with headers,
+  POST with JSON, inline headers, Faker payload resolution, placeholder
+  header resolution, GET without body, sensitive header redaction,
+  response body excerpt population, large response truncation,
+  response_headers in log, request_cookies in log, concurrent request
+  isolation, WS event request data.
+
+## 1.8.0 — Structured request/response samples
+
+Representative request/response records persisted per run, with separate
+request headers/body/cookies, response headers/body, configurable body
+limits, and a dedicated API endpoint.
+
+### Added
+
+- **`SampleOptions`** config model (`config/models.py`): `enabled`,
+  `max_per_run` (default 20), `max_request_body_size` (default 64KB),
+  `max_response_body_size` (default 64KB). Lives under the `samples:` key
+  in `blazehammer.yaml` and the normal merge pipeline.
+- **`SampleStore`** (`web/samples.py`): collects bounded representative
+  samples per run — first request, first success, first failure, one per
+  distinct HTTP status code (up to `max_per_run`). Body excerpts are
+  truncated at the configured byte cap; JSON payloads are parsed when
+  possible.
+- **`RequestSample`** Pydantic model (`web/models.py`): typed response for
+  the new API endpoint — structured `request` (method, url, headers, body,
+  cookies) and `response` (status_code, headers, body, content_type, size,
+  truncated) sub-models, plus `id`, `timestamp`, `reason`, `duration_ms`,
+  `ok`, `attempts`, `error`, `error_category`.
+- **`GET /api/v1/runs/{id}/samples`** endpoint: returns the full list of
+  representative samples for a run.
+- **`sample_count`** field added to `RunSummary` and `GET /runs/{id}`
+  responses.
+- **Cookie extraction** (`engine/runner.py`): `RequestOutcome` now carries
+  `resolved_cookies` parsed from the `Cookie` request header. Cookies are
+  redacted via `redact_mapping` before storage.
+- **`request_cookies`** field in `ResponseSnapshot` log entries.
+- **30 new tests** in `tests/unit/test_samples.py`: truncation, body
+  excerpt, classification logic (first/first_success/first_failure/
+  distinct status), redaction (cookies, headers, payload), truncation of
+  request and response bodies, live API integration (endpoint, summary,
+  disabled mode, unknown run, failures, max_per_run, cookies).
+
+### Changed
+
+- **`RunHandle`** (`web/runs.py`): gains `sample_store` field; lazily
+  initialised on first outcome when `cfg.samples.enabled`. `_record_outcome`
+  feeds every outcome to the store.
+- **`response_snapshot_fields`**: no longer the sole response capture path;
+  samples carry their own body structures independently.
+- **`RunConfig.needs_bodies`**: unchanged — body reads still gated by
+  `response_logging.mode`; sample body capture piggy-backs on the same read.
+
+### Removed
+
+- None.
+
+## 1.7.0 — Full HTTP method support
+
+All nine standard HTTP methods are now first-class citizens, replacing the
+hard-coded GET/POST bifurcation with a single generic pipeline.
+
+### Added
+
+- **All standard HTTP methods**: GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS,
+  CONNECT, TRACE — each accepted via CLI (`--method`), YAML config, and API
+  (`POST /api/v1/runs`, `/preview`, `/validate`, `/config/save`).
+- **`Method` enum** (`config/models.py`): single source of truth with
+  case-insensitive lookup, `.supports_body` property, and
+  `Method.allowed_values()` for CLI help / OpenAPI exposure.
+- **HEAD** requests never attempt body reads; response is status + headers +
+  timing only.
+- **CONNECT / TRACE** pass through to the HTTP transport; transport-level
+  rejections report the real HTTP error rather than a Blaze Hammer internal
+  error.
+- **WebSocket `request.completed`** events now include the `method` field.
+
+### Changed
+
+- **Request planner** (`engine/planner.py`): body attachment is driven by
+  `Method.supports_body` instead of `if method == "POST"`. Body-capable
+  methods (POST, PUT, PATCH, DELETE) with a payload get the resolved body
+  attached; bodyless methods never do.
+- **Runner** (`engine/runner.py`): request kwargs are built generically for
+  all methods — no per-method `if/elif` chains.
+- **Validation** (`config/validation.py`): "requires payload" check applies to
+  all `supports_body` methods, not just POST.
+- **Preview warning**: "No payload configured" now fires for any body-capable
+  method, not only POST.
+- CLI `--method` choices and init prompt now list all nine methods.
+
+### Fixed
+
+- CLI `--method` parsing is fully case-insensitive (e.g. `--method patch`
+  resolves to PATCH).
+- `SaveConfigRequest` regex updated to accept all nine method values; the
+  PATCH-style `/config/save` endpoint no longer rejects valid methods.
+
 ## 1.6.0 — Response snapshots & run history
 
 Every completed request now stores a bounded response snapshot alongside the

@@ -1,7 +1,7 @@
 [project]
 name = "blazehammer"
-version = "1.6.0"
-description = "Blaze Hammer is an asynchronous API testing and traffic-generation tool built in Python. It generates dynamic payloads and headers through placeholder injection, supports GET/POST with JSON or form bodies, configurable concurrency, rate limiting, retries, live Rich output, and structured result export."
+version = "1.10.0"
+description = "Blaze Hammer is an asynchronous API testing and traffic-generation tool built in Python. It generates dynamic payloads and headers through placeholder injection, supports all standard HTTP methods (GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS, CONNECT, TRACE) with eight body encodings (none, json, form, multipart, raw, xml, html, binary), configurable concurrency, rate limiting, retries, live Rich output, and structured result export."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
