@@ -1,22 +1,14 @@
-# Custom parsers for different status codes
-def parse_200(response):
-    return f"- {response}"
+"""Backwards-compatible import path.
 
+The canonical location is ``blaze_hammer/ext/parsers.py``; edit that file.
+This shim keeps ``utils.custom_parsers`` imports working.
+"""  # noqa: A005
 
-custom_response_parsers = {"all": parse_200, 200: parse_200}
-
-
-# Custom payload parser
-def payload_parse(json):
-    return json
-
-
-custom_payload_parsers = {"all": payload_parse, 200: payload_parse}
-
-
-# Custom headers parser
-def headers_parse(json):
-    return json
-
-
-custom_headers_parsers = {"all": headers_parse, 200: headers_parse}
+from blaze_hammer.ext.parsers import (  # noqa: F401
+    custom_headers_parsers,
+    custom_payload_parsers,
+    custom_response_parsers,
+    headers_parse,
+    parse_200,
+    payload_parse,
+)
