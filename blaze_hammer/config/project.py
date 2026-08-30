@@ -389,6 +389,7 @@ web:
     enabled: true
     origins:
       - "http://localhost:5173"
+      - "https://blazehammer.pages.dev"
 """
 
 TEMPLATE_PAYLOAD = """\
