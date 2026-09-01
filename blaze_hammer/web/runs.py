@@ -17,7 +17,7 @@ from collections import OrderedDict, deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from blaze_hammer.errors import BlazeHammerError, ConfigurationError
+from blaze_hammer.errors import BlazeHammerError
 from blaze_hammer.security.redaction import redact_mapping
 
 if TYPE_CHECKING:
@@ -103,7 +103,7 @@ class RunHandle:
     run_id: str
     cfg: RunConfig
     requested: int
-    status: str = "running"  # running|completed|stopped|error
+    status: str = "running"  # running|completed|cancelled|error
     error: str | None = None
     created_ms: int = field(default_factory=_now_ms)
     finished_ms: int | None = None
@@ -132,7 +132,7 @@ class RunHandle:
             target=self.cfg.target,
             method=self.cfg.method.value,
             requested=self.requested,
-            interrupted=(self.status == "stopped"),
+            interrupted=(self.status == "cancelled"),
         )
         latency = {
             key: (round(value * 1000, 1) if value is not None else None)
@@ -201,12 +201,6 @@ class RunManager:
         from blaze_hammer import services
         from blaze_hammer.engine.planner import RequestTemplates
 
-        if any(h.status == "running" for h in self._runs.values()):
-            raise ConfigurationError(
-                "A run is already in progress",
-                hint="stop it first or wait for completion",
-            )
-
         templates = None
         if headers_obj is not None or payload_obj is not None:
             templates = RequestTemplates(headers=headers_obj, payload=payload_obj)
@@ -232,13 +226,12 @@ class RunManager:
                     {"type": "run.started", "run_id": run_id, "requested": cfg.requests}
                 )
                 stats = await services.execute_prepared(prepared)
-                handle.status = "stopped" if stats.interrupted else "completed"
+                handle.status = "cancelled" if stats.interrupted else "completed"
                 handle.finished_ms = _now_ms()
-                await self._publish(
-                    {"type": "run.completed", "run_id": run_id, **handle.live_stats()}
-                )
+                event_type = "run.cancelled" if stats.interrupted else "run.completed"
+                await self._publish({"type": event_type, "run_id": run_id, **handle.live_stats()})
             except asyncio.CancelledError:
-                handle.status = "stopped"
+                handle.status = "cancelled"
                 handle.finished_ms = _now_ms()
                 raise
             except Exception as exc:  # noqa: BLE001 - surfaced to clients

@@ -315,7 +315,7 @@ def test_preview_resolves_placeholders(authed):
         assert isinstance(value, str) and len(value) == 3
 
 
-def test_run_lifecycle_rest_then_ws_events(authed):
+def test_run_lifecycle_rest_then_ws_events(authed, server_url):
     """Phase 1 (REST): run reaches completion. Phase 2 (WS): live events."""
     # Phase 1 — REST-driven run, poll to completion.
     started = authed.post(
@@ -335,13 +335,18 @@ def test_run_lifecycle_rest_then_ws_events(authed):
     assert "request_headers" in log[0]
 
     # Phase 2 — WS subscriber sees live events for a fresh small run.
+    # Use a slow enough endpoint so the stats ticker (0.25s interval) fires.
+    (authed.app.state.web.project_dir / "blazehammer.yaml").write_text(
+        f'target: "{server_url}/slow?ms=150"\nmethod: GET\nrequests: 4\nconcurrency: 2\n',
+        encoding="utf-8",
+    )
     with authed.websocket_connect("/api/v1/ws") as ws:
         hello = ws.receive_json()
         assert hello["type"] == "hello"
 
         second = authed.post(
             "/api/v1/runs",
-            json={"requests": 2, "concurrency": 2},
+            json={"requests": 4, "concurrency": 2},
             headers=XRW,
         )
         second_id = second.json()["run_id"]
@@ -359,7 +364,7 @@ def test_run_lifecycle_rest_then_ws_events(authed):
         final = events[-1]
         assert final["type"] == "run.completed"
         assert final["run_id"] == second_id
-        assert final["completed"] == 2
+        assert final["completed"] == 4
 
 
 def test_stop_running_flow(authed, server_url):
@@ -374,22 +379,165 @@ def test_stop_running_flow(authed, server_url):
     stopped = authed.post(f"/api/v1/runs/{run_id}/stop", headers=XRW)
     assert stopped.status_code == 200
     summary = _wait_finished(authed, run_id)
-    assert summary["status"] == "stopped"
+    assert summary["status"] == "cancelled"
     assert summary["completed"] < 50
 
 
-def test_second_start_rejected_while_running(authed, server_url):
+def test_concurrent_runs_run_independently(authed, server_url):
+    """Start three runs against a slow target; all execute concurrently."""
+    slow_target = f"{server_url}/slow?ms=400"
     (authed.app.state.web.project_dir / "blazehammer.yaml").write_text(
-        f'target: "{server_url}/slow?ms=200"\nmethod: GET\nrequests: 30\nconcurrency: 2\n',
+        f'target: "{slow_target}"\nmethod: GET\nrequests: 12\nconcurrency: 2\n',
         encoding="utf-8",
     )
-    first = authed.post("/api/v1/runs", json={}, headers=XRW)
-    assert first.status_code == 200
-    second = authed.post("/api/v1/runs", json={}, headers=XRW)
-    assert second.status_code == 400
-    rid = first.json()["run_id"]
+    started = [authed.post("/api/v1/runs", json={}, headers=XRW).json() for _ in range(3)]
+    for s in started:
+        assert s["status"] == "running", s
+    ids = {s["run_id"] for s in started}
+    assert len(ids) == 3
+
+    # All three are live at the same time.
+    for rid in ids:
+        assert authed.get(f"/api/v1/runs/{rid}").json()["status"] == "running"
+    for rid in ids:
+        _wait_finished(authed, rid)
+    for rid in ids:
+        assert authed.get(f"/api/v1/runs/{rid}").json()["status"] == "completed"
+
+
+def test_cancel_one_run_others_continue(authed, server_url):
+    """Cancel B while A and C run; A/C finish, B is cancelled."""
+    slow_target = f"{server_url}/slow?ms=400"
+    (authed.app.state.web.project_dir / "blazehammer.yaml").write_text(
+        f'target: "{slow_target}"\nmethod: GET\nrequests: 20\nconcurrency: 2\n',
+        encoding="utf-8",
+    )
+    a = authed.post("/api/v1/runs", json={}, headers=XRW).json()
+    b = authed.post("/api/v1/runs", json={}, headers=XRW).json()
+    c = authed.post("/api/v1/runs", json={}, headers=XRW).json()
+
+    stopped = authed.post(f"/api/v1/runs/{b['run_id']}/stop", headers=XRW)
+    assert stopped.status_code == 200
+    summary_b = _wait_finished(authed, b["run_id"])
+    assert summary_b["status"] == "cancelled"
+
+    # A and C must still be running and eventually complete.
+    assert authed.get(f"/api/v1/runs/{a['run_id']}").json()["status"] == "running"
+    assert authed.get(f"/api/v1/runs/{c['run_id']}").json()["status"] == "running"
+    _wait_finished(authed, a["run_id"])
+    _wait_finished(authed, c["run_id"])
+    assert authed.get(f"/api/v1/runs/{a['run_id']}").json()["status"] == "completed"
+    assert authed.get(f"/api/v1/runs/{c['run_id']}").json()["status"] == "completed"
+
+
+def test_concurrent_runs_ws_events_carry_run_id(authed, server_url):
+    """One WS connection receives interleaved events for concurrent runs."""
+    slow_target = f"{server_url}/slow?ms=300"
+    (authed.app.state.web.project_dir / "blazehammer.yaml").write_text(
+        f'target: "{slow_target}"\nmethod: GET\nrequests: 6\nconcurrency: 2\n',
+        encoding="utf-8",
+    )
+    with authed.websocket_connect("/api/v1/ws") as ws:
+        assert ws.receive_json()["type"] == "hello"
+        ids = {authed.post("/api/v1/runs", json={}, headers=XRW).json()["run_id"] for _ in range(3)}
+        seen_start: set[str] = set()
+        seen_completed: set[str] = set()
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            ev = ws.receive_json()
+            if ev["type"] == "run.started":
+                seen_start.add(ev["run_id"])
+            elif ev["type"] in ("run.completed", "run.cancelled", "run.error"):
+                seen_completed.add(ev["run_id"])
+                if seen_completed == ids:
+                    break
+        assert seen_start == ids
+        assert seen_completed == ids
+
+
+def test_one_run_fails_others_continue(authed, server_url):
+    """A config-error run at POST must not disturb concurrent runs."""
+    slow_target = f"{server_url}/slow?ms=300"
+    (authed.app.state.web.project_dir / "blazehammer.yaml").write_text(
+        f'target: "{slow_target}"\nmethod: GET\nrequests: 24\nconcurrency: 2\n',
+        encoding="utf-8",
+    )
+    a = authed.post("/api/v1/runs", json={}, headers=XRW).json()
+    # A config error (bad target) returns 400 deterministically.
+    bad = authed.post("/api/v1/runs", json={"target": "not-a-url"}, headers=XRW)
+    assert bad.status_code == 400
+    c = authed.post("/api/v1/runs", json={}, headers=XRW).json()
+    assert c["status"] == "running"
+    _wait_finished(authed, a["run_id"])
+    _wait_finished(authed, c["run_id"])
+    assert authed.get(f"/api/v1/runs/{a['run_id']}").json()["status"] == "completed"
+    assert authed.get(f"/api/v1/runs/{c['run_id']}").json()["status"] == "completed"
+
+
+def test_start_new_run_while_others_active(authed, server_url):
+    """Starting a fresh run while several run remains healthy."""
+    slow_target = f"{server_url}/slow?ms=350"
+    (authed.app.state.web.project_dir / "blazehammer.yaml").write_text(
+        f'target: "{slow_target}"\nmethod: GET\nrequests: 10\nconcurrency: 2\n',
+        encoding="utf-8",
+    )
+    first = [authed.post("/api/v1/runs", json={}, headers=XRW).json() for _ in range(3)]
+    fourth = authed.post("/api/v1/runs", json={}, headers=XRW).json()
+    assert fourth["status"] == "running"
+    for s in first + [fourth]:
+        _wait_finished(authed, s["run_id"])
+    for s in first + [fourth]:
+        assert authed.get(f"/api/v1/runs/{s['run_id']}").json()["status"] == "completed"
+
+
+def test_cancel_immediately_after_start(authed, server_url):
+    """Cancelling a run right after starting it still ends cancelled."""
+    slow_target = f"{server_url}/slow?ms=1000"
+    (authed.app.state.web.project_dir / "blazehammer.yaml").write_text(
+        f'target: "{slow_target}"\nmethod: GET\nrequests: 50\nconcurrency: 2\n',
+        encoding="utf-8",
+    )
+    s = authed.post("/api/v1/runs", json={}, headers=XRW).json()
+    rid = s["run_id"]
     authed.post(f"/api/v1/runs/{rid}/stop", headers=XRW)
-    _wait_finished(authed, rid)
+    summary = _wait_finished(authed, rid)
+    assert summary["status"] == "cancelled"
+
+
+def test_concurrent_runs_cleanup_keeps_bounded_history(authed, server_url):
+    """Many finished runs stay bounded by the history limit."""
+    from blaze_hammer.web.runs import HISTORY_LIMIT
+
+    echo = f"{server_url}/echo"
+    (authed.app.state.web.project_dir / "blazehammer.yaml").write_text(
+        f'target: "{echo}"\nmethod: GET\nrequests: 2\nconcurrency: 2\n',
+        encoding="utf-8",
+    )
+    ids = set()
+    for _ in range(HISTORY_LIMIT + 5):
+        s = authed.post("/api/v1/runs", json={}, headers=XRW).json()
+        ids.add(s["run_id"])
+        _wait_finished(authed, s["run_id"])
+    remaining = authed.get("/api/v1/runs").json()["runs"]
+    assert len(remaining) <= HISTORY_LIMIT
+
+
+def test_shutdown_stops_active_runs(authed, server_url):
+    """Graceful shutdown requests stop on every active run."""
+    slow_target = f"{server_url}/slow?ms=500"
+    (authed.app.state.web.project_dir / "blazehammer.yaml").write_text(
+        f'target: "{slow_target}"\nmethod: GET\nrequests: 100\nconcurrency: 4\n',
+        encoding="utf-8",
+    )
+    s = authed.post("/api/v1/runs", json={}, headers=XRW).json()
+    rid = s["run_id"]
+    manager = authed.app.state.web.manager
+    assert manager is not None
+    import asyncio
+
+    asyncio.run(manager.shutdown())
+    summary = _wait_finished(authed, rid)
+    assert summary["status"] in ("cancelled", "completed")
 
 
 def test_ws_unauthenticated_closed(noauth):
